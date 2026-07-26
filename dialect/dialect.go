@@ -1,0 +1,327 @@
+// Package dialect renders dialect-neutral SQL syntax for concrete databases.
+package dialect
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/oka/ksql/sqlast"
+)
+
+// Dialect captures SQL syntax choices relevant to KQL lowering.
+type Dialect interface {
+	Name() string
+	QuoteIdentifier(string) string
+	Placeholder(int) string
+	Boolean(bool) string
+	Regex(left, right string, caseSensitive bool) (string, bool)
+	JSONIndex(value, index string) string
+	SafeCast(expression, target string) (string, bool)
+	ApplyLimit(selectSQL, limitSQL string) string
+	SupportsNullOrdering() bool
+}
+
+type standard struct{ name string }
+
+// ANSI returns the portable SQL renderer. It avoids vendor-only features.
+func ANSI() Dialect { return standard{name: "ansi"} }
+
+func (d standard) Name() string                    { return d.name }
+func (d standard) QuoteIdentifier(s string) string { return quoteDouble(s) }
+func (d standard) Placeholder(index int) string    { return "?" }
+func (d standard) Boolean(value bool) string {
+	if value {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+func (d standard) Regex(_, _ string, _ bool) (string, bool) { return "", false }
+func (d standard) JSONIndex(value, index string) string {
+	return "JSON_QUERY(" + value + ", '$.' || " + index + ")"
+}
+func (d standard) SafeCast(_, _ string) (string, bool) { return "", false }
+func (d standard) ApplyLimit(sql, limit string) string {
+	return sql + " FETCH FIRST " + limit + " ROWS ONLY"
+}
+func (d standard) SupportsNullOrdering() bool { return true }
+
+// Render converts a SQL AST to one formatted query string.
+func Render(d Dialect, query sqlast.Query) (string, error) {
+	r := renderer{dialect: d}
+	return r.query(query)
+}
+
+type renderer struct{ dialect Dialect }
+
+func (r renderer) query(query sqlast.Query) (string, error) {
+	switch q := query.(type) {
+	case *sqlast.Select:
+		return r.selectQuery(q)
+	case *sqlast.Union:
+		if len(q.Queries) == 0 {
+			return "", fmt.Errorf("union has no operands")
+		}
+		parts := make([]string, 0, len(q.Queries))
+		for _, operand := range q.Queries {
+			sql, err := r.query(operand)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, "("+sql+")")
+		}
+		operator := " UNION "
+		if q.All {
+			operator = " UNION ALL "
+		}
+		return strings.Join(parts, operator), nil
+	default:
+		return "", fmt.Errorf("unsupported SQL query node %T", query)
+	}
+}
+
+func (r renderer) selectQuery(query *sqlast.Select) (string, error) {
+	var b strings.Builder
+	b.WriteString("SELECT ")
+	if query.Distinct {
+		b.WriteString("DISTINCT ")
+	}
+	if len(query.Projections) == 0 {
+		b.WriteString("*")
+	} else {
+		for i, item := range query.Projections {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			expr, err := r.expr(item.Expr)
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(expr)
+			if item.Alias != "" {
+				b.WriteString(" AS ")
+				b.WriteString(r.dialect.QuoteIdentifier(item.Alias))
+			}
+		}
+	}
+	if query.From != nil {
+		from, err := r.source(query.From)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(" FROM ")
+		b.WriteString(from)
+	}
+	if query.Where != nil {
+		where, err := r.expr(query.Where)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(" WHERE ")
+		b.WriteString(where)
+	}
+	if len(query.GroupBy) > 0 {
+		items, err := r.expressions(query.GroupBy)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(" GROUP BY ")
+		b.WriteString(strings.Join(items, ", "))
+	}
+	if len(query.OrderBy) > 0 {
+		b.WriteString(" ORDER BY ")
+		for i, order := range query.OrderBy {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			expr, err := r.expr(order.Expr)
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(expr)
+			if order.Direction != "" {
+				b.WriteByte(' ')
+				b.WriteString(strings.ToUpper(order.Direction))
+			}
+			if order.Nulls != "" && r.dialect.SupportsNullOrdering() {
+				b.WriteString(" NULLS ")
+				b.WriteString(strings.ToUpper(order.Nulls))
+			}
+		}
+	}
+	sql := b.String()
+	if query.Limit != nil {
+		limit, err := r.expr(query.Limit)
+		if err != nil {
+			return "", err
+		}
+		sql = r.dialect.ApplyLimit(sql, limit)
+	}
+	return sql, nil
+}
+
+func (r renderer) source(source sqlast.Source) (string, error) {
+	switch s := source.(type) {
+	case *sqlast.Table:
+		parts := make([]string, len(s.Parts))
+		for i, part := range s.Parts {
+			parts[i] = r.dialect.QuoteIdentifier(part)
+		}
+		result := strings.Join(parts, ".")
+		if s.Alias != "" {
+			result += " AS " + r.dialect.QuoteIdentifier(s.Alias)
+		}
+		return result, nil
+	case *sqlast.Subquery:
+		query, err := r.query(s.Query)
+		if err != nil {
+			return "", err
+		}
+		return "(" + query + ") AS " + r.dialect.QuoteIdentifier(s.Alias), nil
+	case *sqlast.Join:
+		left, err := r.source(s.Left)
+		if err != nil {
+			return "", err
+		}
+		right, err := r.source(s.Right)
+		if err != nil {
+			return "", err
+		}
+		result := left + " " + strings.ToUpper(s.Kind) + " JOIN " + right
+		if s.On != nil {
+			on, err := r.expr(s.On)
+			if err != nil {
+				return "", err
+			}
+			result += " ON " + on
+		} else if len(s.Using) > 0 {
+			quoted := make([]string, len(s.Using))
+			for i, column := range s.Using {
+				quoted[i] = r.dialect.QuoteIdentifier(column)
+			}
+			result += " USING (" + strings.Join(quoted, ", ") + ")"
+		}
+		return result, nil
+	default:
+		return "", fmt.Errorf("unsupported SQL source node %T", source)
+	}
+}
+
+func (r renderer) expr(expression sqlast.Expr) (string, error) {
+	switch e := expression.(type) {
+	case *sqlast.Identifier:
+		parts := make([]string, len(e.Parts))
+		for i, part := range e.Parts {
+			parts[i] = r.dialect.QuoteIdentifier(part)
+		}
+		return strings.Join(parts, "."), nil
+	case *sqlast.Literal:
+		return r.literal(e)
+	case *sqlast.Parameter:
+		return r.dialect.Placeholder(e.Index), nil
+	case *sqlast.Star:
+		return "*", nil
+	case *sqlast.Unary:
+		operand, err := r.expr(e.Operand)
+		return e.Operator + operand, err
+	case *sqlast.Binary:
+		left, err := r.expr(e.Left)
+		if err != nil {
+			return "", err
+		}
+		right, err := r.expr(e.Right)
+		if err != nil {
+			return "", err
+		}
+		return "(" + left + " " + e.Operator + " " + right + ")", nil
+	case *sqlast.Call:
+		args, err := r.expressions(e.Args)
+		if err != nil {
+			return "", err
+		}
+		return strings.ToUpper(e.Name) + "(" + strings.Join(args, ", ") + ")", nil
+	case *sqlast.List:
+		items, err := r.expressions(e.Items)
+		return "(" + strings.Join(items, ", ") + ")", err
+	case *sqlast.Case:
+		var b strings.Builder
+		b.WriteString("CASE")
+		for _, branch := range e.Branches {
+			condition, err := r.expr(branch.Condition)
+			if err != nil {
+				return "", err
+			}
+			result, err := r.expr(branch.Result)
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(" WHEN ")
+			b.WriteString(condition)
+			b.WriteString(" THEN ")
+			b.WriteString(result)
+		}
+		if e.Else != nil {
+			otherwise, err := r.expr(e.Else)
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(" ELSE ")
+			b.WriteString(otherwise)
+		}
+		b.WriteString(" END")
+		return b.String(), nil
+	case *sqlast.Cast:
+		expression, err := r.expr(e.Expr)
+		if err != nil {
+			return "", err
+		}
+		if e.Safe {
+			if result, ok := r.dialect.SafeCast(expression, e.Type); ok {
+				return result, nil
+			}
+			return "", fmt.Errorf("dialect %s has no safe cast", r.dialect.Name())
+		}
+		return "CAST(" + expression + " AS " + e.Type + ")", nil
+	case *sqlast.Index:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		index, err := r.expr(e.Index)
+		if err != nil {
+			return "", err
+		}
+		return r.dialect.JSONIndex(value, index), nil
+	default:
+		return "", fmt.Errorf("unsupported SQL expression node %T", expression)
+	}
+}
+
+func (r renderer) expressions(expressions []sqlast.Expr) ([]string, error) {
+	result := make([]string, len(expressions))
+	for i, expression := range expressions {
+		value, err := r.expr(expression)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = value
+	}
+	return result, nil
+}
+
+func (r renderer) literal(literal *sqlast.Literal) (string, error) {
+	switch literal.Kind {
+	case sqlast.NullLiteral:
+		return "NULL", nil
+	case sqlast.NumberLiteral:
+		return literal.Value, nil
+	case sqlast.StringLiteral, sqlast.DateTimeLiteral, sqlast.IntervalLiteral, sqlast.JSONLiteral:
+		return quoteString(literal.Value), nil
+	case sqlast.BooleanLiteral:
+		return r.dialect.Boolean(strings.EqualFold(literal.Value, "true")), nil
+	default:
+		return "", fmt.Errorf("invalid SQL literal kind %d", literal.Kind)
+	}
+}
+
+func quoteDouble(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }
+func quoteString(value string) string { return `'` + strings.ReplaceAll(value, `'`, `''`) + `'` }
