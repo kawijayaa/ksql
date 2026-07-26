@@ -115,3 +115,15 @@ func TestCompileTabularLet(t *testing.T) {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}
 }
+
+func TestCustomFunctionRule(t *testing.T) {
+	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithFunction("hash_sha256", ksql.SQLFunction("digest_sha256")))
+	result := compiler.Compile(`T | project digest=hash_sha256(value)`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT DIGEST_SHA256("value") AS "digest" FROM (SELECT * FROM "T") AS "_k0"`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}

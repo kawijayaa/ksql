@@ -14,15 +14,22 @@ import (
 // Compiler translates KQL into one configured SQL dialect. A Compiler is safe
 // for concurrent use after construction.
 type Compiler struct {
-	dialect dialect.Dialect
+	dialect       dialect.Dialect
+	functionRules map[string]FunctionRule
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
-func New(target dialect.Dialect) *Compiler {
+func New(target dialect.Dialect, options ...Option) *Compiler {
 	if target == nil {
 		target = dialect.ANSI()
 	}
-	return &Compiler{dialect: target}
+	compiler := &Compiler{dialect: target, functionRules: make(map[string]FunctionRule)}
+	for _, option := range options {
+		if option != nil {
+			option(compiler)
+		}
+	}
+	return compiler
 }
 
 // Result contains either SQL or error diagnostics. SQL is empty whenever an
@@ -501,6 +508,17 @@ func (s *compileState) call(value *kql.CallExpression) sqlast.Expr {
 	function := strings.ToLower(name.Name)
 	args := s.expressions(value.Args)
 	s.use("function."+function, "equivalent", value.Span)
+	if rule, ok := s.compiler.functionRules[function]; ok {
+		result, err := rule(args)
+		if err != nil {
+			s.error("KQLL0504", value.Span, "function."+function, err.Error())
+			return nil
+		}
+		if result == nil {
+			s.error("KQLL0505", value.Span, "function."+function, "custom function rule returned a nil expression")
+		}
+		return result
+	}
 	switch function {
 	case "iif", "iff":
 		if len(args) != 3 {
