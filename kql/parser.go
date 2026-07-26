@@ -181,6 +181,10 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		return op, errs
 	case "top":
 		return parseTop(op, body)
+	case "join", "lookup":
+		return parseJoin(op, body)
+	case "union":
+		return parseUnion(op, body)
 	case "count":
 		op.Body = RawSpec{Tokens: body}
 		return op, nil
@@ -188,6 +192,97 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		op.Body = RawSpec{Tokens: body}
 		return op, nil
 	}
+}
+
+func parseJoin(op Operator, tokens []Token) (Operator, []ParseError) {
+	spec := JoinSpec{Kind: "inner"}
+	if op.Kind == "join" {
+		spec.Kind = "innerunique"
+	} else {
+		spec.Kind = "leftouter"
+	}
+	position := 0
+	for position+2 < len(tokens) && tokens[position].Kind == IdentifierToken && tokens[position+1].Text == "=" {
+		name, value := lower(tokens[position]), lower(tokens[position+2])
+		if name == "kind" {
+			spec.Kind = value
+		}
+		position += 3
+	}
+	conditionAt := topLevelKeyword(tokens[position:], "on")
+	conditionKeyword := "on"
+	whereAt := topLevelKeyword(tokens[position:], "where")
+	if conditionAt < 0 || whereAt >= 0 && whereAt < conditionAt {
+		conditionAt = whereAt
+		conditionKeyword = "where"
+	}
+	if conditionAt < 0 {
+		op.Body = spec
+		return op, []ParseError{{Code: "KQLP0310", Message: "join requires an on condition", Span: op.Span}}
+	}
+	conditionAt += position
+	rightTokens := trimParentheses(tokens[position:conditionAt])
+	if len(rightTokens) == 0 {
+		op.Body = spec
+		return op, []ParseError{{Code: "KQLP0311", Message: "join requires a right input", Span: op.Span}}
+	}
+	right, errs := parsePipeline(rightTokens)
+	spec.Right = right
+	conditionTokens := tokens[conditionAt+1:]
+	if conditionKeyword == "where" {
+		spec.Condition, _ = parseExpressionTokens(conditionTokens)
+	} else {
+		spec.Conditions, errs = appendExpressions(spec.Conditions, conditionTokens, errs)
+	}
+	op.Body = spec
+	return op, errs
+}
+
+func parseUnion(op Operator, tokens []Token) (Operator, []ParseError) {
+	spec := UnionSpec{Kind: "outer"}
+	position := 0
+	for position+2 < len(tokens) && tokens[position].Kind == IdentifierToken && tokens[position+1].Text == "=" {
+		if lower(tokens[position]) == "kind" {
+			spec.Kind = lower(tokens[position+2])
+		}
+		position += 3
+	}
+	var errs []ParseError
+	for _, inputTokens := range splitTopLevel(tokens[position:], ",") {
+		inputTokens = trimParentheses(inputTokens)
+		if len(inputTokens) == 0 {
+			continue
+		}
+		input, inputErrs := parsePipeline(inputTokens)
+		spec.Inputs = append(spec.Inputs, input)
+		errs = append(errs, inputErrs...)
+	}
+	op.Body = spec
+	return op, errs
+}
+
+func appendExpressions(destination []Expression, tokens []Token, errs []ParseError) ([]Expression, []ParseError) {
+	expressions, expressionErrs := parseExpressionList(tokens)
+	return append(destination, expressions...), append(errs, expressionErrs...)
+}
+
+func trimParentheses(tokens []Token) []Token {
+	if len(tokens) < 2 || tokens[0].Text != "(" || tokens[len(tokens)-1].Text != ")" {
+		return tokens
+	}
+	depth := 0
+	for i, token := range tokens {
+		switch token.Text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth == 0 && i != len(tokens)-1 {
+				return tokens
+			}
+		}
+	}
+	return tokens[1 : len(tokens)-1]
 }
 
 func parseSummarize(op Operator, tokens []Token) (Operator, []ParseError) {

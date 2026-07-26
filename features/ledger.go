@@ -270,6 +270,7 @@ const coreEquivalent = `
 source.table source.print statement.let statement.expression
 operator.where operator.project operator.extend operator.summarize
 operator.distinct operator.count operator.sort operator.take operator.top
+operator.join operator.lookup operator.union
 operator.scalar.and operator.scalar.or operator.scalar.add
 operator.scalar.subtract operator.scalar.multiply operator.scalar.divide
 operator.scalar.modulo operator.scalar.less_than operator.scalar.less_than_or_equal

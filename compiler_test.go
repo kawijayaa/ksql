@@ -60,3 +60,25 @@ func TestUnknownFunctionIsNotPassedThrough(t *testing.T) {
 		t.Fatalf("code = %q", got)
 	}
 }
+
+func TestCompileJoin(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`T | join kind=inner (U | where active == true) on key`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM (SELECT * FROM "U") AS "_k1" WHERE ("active" = TRUE)) AS "_k2" USING ("key")`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileQualifiedJoin(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`T | join kind=leftouter (U) on $left.key == $right.other_key`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" LEFT JOIN (SELECT * FROM "U") AS "_k1" ON ("_k0"."key" = "_k1"."other_key")`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}

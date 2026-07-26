@@ -56,6 +56,22 @@ func TestParseRecognizesAdvancedOperator(t *testing.T) {
 	}
 }
 
+func TestParseJoinAndUnion(t *testing.T) {
+	script, errs := Parse(`T | join kind=inner (U | where active == true) on key | union V, (W | take 1)`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	operators := script.Statements[0].(*ExpressionStatement).Pipeline.Operators
+	join := operators[0].Body.(JoinSpec)
+	if join.Kind != "inner" || join.Right.Operators[0].Kind != "where" || len(join.Conditions) != 1 {
+		t.Fatalf("join = %#v", join)
+	}
+	union := operators[1].Body.(UnionSpec)
+	if len(union.Inputs) != 2 || len(union.Inputs[1].Operators) != 1 {
+		t.Fatalf("union = %#v", union)
+	}
+}
+
 func TestParseReportsUnknownOperator(t *testing.T) {
 	_, errs := Parse(`T | frobnicate a`)
 	if len(errs) != 1 || errs[0].Code != "KQLP0301" {

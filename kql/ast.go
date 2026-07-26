@@ -102,12 +102,24 @@ type TopSpec struct {
 	Count Expression
 	By    OrderedExpression
 }
+type JoinSpec struct {
+	Kind       string
+	Right      *Pipeline
+	Conditions []Expression
+	Condition  Expression
+}
+type UnionSpec struct {
+	Kind   string
+	Inputs []*Pipeline
+}
 type RawSpec struct{ Tokens []Token }
 
 func (ExpressionSpec) operatorBody() {}
 func (SummarizeSpec) operatorBody()  {}
 func (SortSpec) operatorBody()       {}
 func (TopSpec) operatorBody()        {}
+func (JoinSpec) operatorBody()       {}
+func (UnionSpec) operatorBody()      {}
 func (RawSpec) operatorBody()        {}
 
 // Expression is a scalar KQL expression.

@@ -107,6 +107,7 @@ type compileState struct {
 	diagnostics []Diagnostic
 	features    []FeatureUse
 	alias       int
+	qualifiers  map[string]string
 }
 
 func (s *compileState) pipeline(pipeline *kql.Pipeline) sqlast.Query {
@@ -163,6 +164,12 @@ func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
 func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlast.Query {
 	feature := "operator." + operator.Kind
 	s.use(feature, "equivalent", operator.Span)
+	if operator.Kind == "join" || operator.Kind == "lookup" {
+		return s.join(input, operator)
+	}
+	if operator.Kind == "union" {
+		return s.union(input, operator)
+	}
 	from := &sqlast.Subquery{Query: input, Alias: s.nextAlias()}
 	switch operator.Kind {
 	case "where":
@@ -259,7 +266,13 @@ func (s *compileState) expression(expression kql.Expression) sqlast.Expr {
 		if bound, ok := s.scalarLets[strings.ToLower(value.Name)]; ok {
 			return bound
 		}
-		return &sqlast.Identifier{Parts: splitName(unquoteKQL(value.Name))}
+		parts := splitName(unquoteKQL(value.Name))
+		if len(parts) > 1 && s.qualifiers != nil {
+			if qualifier, ok := s.qualifiers[strings.ToLower(parts[0])]; ok {
+				parts[0] = qualifier
+			}
+		}
+		return &sqlast.Identifier{Parts: parts}
 	case *kql.LiteralExpression:
 		return lowerLiteral(value)
 	case *kql.StarExpression:
@@ -283,6 +296,88 @@ func (s *compileState) expression(expression kql.Expression) sqlast.Expr {
 		s.error("KQLL0402", expression.NodeSpan(), "expression.unknown", fmt.Sprintf("unsupported expression node %T", expression))
 		return nil
 	}
+}
+
+func (s *compileState) join(input sqlast.Query, operator kql.Operator) sqlast.Query {
+	spec := operator.Body.(kql.JoinSpec)
+	leftAlias := s.nextAlias()
+	rightQuery := s.pipeline(spec.Right)
+	if rightQuery == nil {
+		return nil
+	}
+	rightAlias := s.nextAlias()
+	join := &sqlast.Join{
+		Left:  &sqlast.Subquery{Query: input, Alias: leftAlias},
+		Right: &sqlast.Subquery{Query: rightQuery, Alias: rightAlias},
+	}
+	switch spec.Kind {
+	case "inner":
+		join.Kind = "INNER"
+	case "leftouter":
+		join.Kind = "LEFT"
+	case "rightouter":
+		join.Kind = "RIGHT"
+	case "fullouter":
+		join.Kind = "FULL"
+	case "innerunique":
+		s.error("KQLL0310", operator.Span, "operator.join.innerunique", "innerunique deduplicates the left input and requires schema-aware window lowering")
+		return nil
+	default:
+		s.error("KQLL0311", operator.Span, "operator."+operator.Kind+"."+spec.Kind, "join kind "+spec.Kind+" requires semi/anti relational lowering")
+		return nil
+	}
+	if len(spec.Conditions) > 0 {
+		allNames := true
+		for _, condition := range spec.Conditions {
+			name, ok := condition.(*kql.NameExpression)
+			if !ok || strings.Contains(name.Name, ".") {
+				allNames = false
+				break
+			}
+			join.Using = append(join.Using, unquoteKQL(name.Name))
+		}
+		if !allNames {
+			join.Using = nil
+			previous := s.qualifiers
+			s.qualifiers = map[string]string{"$left": leftAlias, "$right": rightAlias}
+			for _, condition := range spec.Conditions {
+				translated := s.expression(condition)
+				if join.On == nil {
+					join.On = translated
+				} else {
+					join.On = &sqlast.Binary{Left: join.On, Operator: "AND", Right: translated}
+				}
+			}
+			s.qualifiers = previous
+		}
+	} else if spec.Condition != nil {
+		previous := s.qualifiers
+		s.qualifiers = map[string]string{"$left": leftAlias, "$right": rightAlias}
+		join.On = s.expression(spec.Condition)
+		s.qualifiers = previous
+	}
+	return &sqlast.Select{From: join}
+}
+
+func (s *compileState) union(input sqlast.Query, operator kql.Operator) sqlast.Query {
+	spec := operator.Body.(kql.UnionSpec)
+	queries := []sqlast.Query{input}
+	for _, pipeline := range spec.Inputs {
+		query := s.pipeline(pipeline)
+		if query == nil {
+			return nil
+		}
+		queries = append(queries, query)
+	}
+	if spec.Kind == "outer" {
+		s.warn("KQLL0320", operator.Span, "operator.union.outer", "SQL UNION aligns columns by position; KQL outer union aligns and qualifies them by name and type")
+	} else if spec.Kind != "inner" {
+		s.error("KQLL0321", operator.Span, "operator.union."+spec.Kind, "unknown union kind "+spec.Kind)
+		return nil
+	} else {
+		s.warn("KQLL0322", operator.Span, "operator.union.inner", "SQL UNION requires inputs to already have the same projected schema")
+	}
+	return &sqlast.Union{All: true, Queries: queries}
 }
 
 func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
