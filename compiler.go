@@ -16,6 +16,8 @@ import (
 type Compiler struct {
 	dialect       dialect.Dialect
 	functionRules map[string]FunctionRule
+	operatorRules map[string]OperatorRule
+	sourceRules   map[string]SourceRule
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
@@ -23,7 +25,10 @@ func New(target dialect.Dialect, options ...Option) *Compiler {
 	if target == nil {
 		target = dialect.ANSI()
 	}
-	compiler := &Compiler{dialect: target, functionRules: make(map[string]FunctionRule)}
+	compiler := &Compiler{
+		dialect: target, functionRules: make(map[string]FunctionRule),
+		operatorRules: make(map[string]OperatorRule), sourceRules: make(map[string]SourceRule),
+	}
 	for _, option := range options {
 		if option != nil {
 			option(compiler)
@@ -139,6 +144,17 @@ func (s *compileState) pipeline(pipeline *kql.Pipeline) sqlast.Query {
 
 func (s *compileState) source(source kql.Source) sqlast.Query {
 	s.use("source."+source.Kind, "equivalent", source.Span)
+	if rule, ok := s.compiler.sourceRules[strings.ToLower(source.Kind)]; ok {
+		query, err := rule(source)
+		if err != nil {
+			s.error("KQLL0203", source.Span, "source."+source.Kind, err.Error())
+			return nil
+		}
+		if query == nil {
+			s.error("KQLL0204", source.Span, "source."+source.Kind, "custom source rule returned a nil query")
+		}
+		return query
+	}
 	switch source.Kind {
 	case "table":
 		if bound, ok := s.tabularLets[strings.ToLower(source.Name)]; ok {
@@ -192,6 +208,17 @@ func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
 func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlast.Query {
 	feature := "operator." + operator.Kind
 	s.use(feature, "equivalent", operator.Span)
+	if rule, ok := s.compiler.operatorRules[strings.ToLower(operator.Kind)]; ok {
+		query, err := rule(input, operator)
+		if err != nil {
+			s.error("KQLL0303", operator.Span, feature, err.Error())
+			return nil
+		}
+		if query == nil {
+			s.error("KQLL0304", operator.Span, feature, "custom operator rule returned a nil query")
+		}
+		return query
+	}
 	if operator.Kind == "join" || operator.Kind == "lookup" {
 		return s.join(input, operator)
 	}

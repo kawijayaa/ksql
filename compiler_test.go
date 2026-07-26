@@ -6,6 +6,8 @@ import (
 	"github.com/kawijayaa/ksql"
 	"github.com/kawijayaa/ksql/dialect"
 	"github.com/kawijayaa/ksql/features"
+	"github.com/kawijayaa/ksql/kql"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 func TestCompilePipeline(t *testing.T) {
@@ -123,6 +125,20 @@ func TestCustomFunctionRule(t *testing.T) {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
 	want := `SELECT DIGEST_SHA256("value") AS "digest" FROM (SELECT * FROM "T") AS "_k0"`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCustomOperatorRule(t *testing.T) {
+	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithOperator("evaluate", func(input sqlast.Query, operator kql.Operator) (sqlast.Query, error) {
+		return &sqlast.Select{From: &sqlast.Subquery{Query: input, Alias: "plugin_input"}}, nil
+	}))
+	result := compiler.Compile(`T | evaluate identity()`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "T") AS "plugin_input"`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}
