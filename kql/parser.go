@@ -161,6 +161,9 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 	}
 
 	body := tokens[1:]
+	if kind == "sort" && len(body) > 0 && lower(body[0]) == "by" {
+		body = body[1:]
+	}
 	switch kind {
 	case "where", "take", "sample", "sample-distinct":
 		expr, errs := parseExpressionTokens(body)

@@ -291,6 +291,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return "", err
 		}
 		return r.dialect.JSONIndex(value, index), nil
+	case *sqlast.Regex:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		pattern, err := r.expr(e.Pattern)
+		if err != nil {
+			return "", err
+		}
+		if result, ok := r.dialect.Regex(value, pattern, e.CaseSensitive); ok {
+			return result, nil
+		}
+		return "", fmt.Errorf("dialect %s has no regular expression operator", r.dialect.Name())
 	default:
 		return "", fmt.Errorf("unsupported SQL expression node %T", expression)
 	}
@@ -314,7 +327,13 @@ func (r renderer) literal(literal *sqlast.Literal) (string, error) {
 		return "NULL", nil
 	case sqlast.NumberLiteral:
 		return literal.Value, nil
-	case sqlast.StringLiteral, sqlast.DateTimeLiteral, sqlast.IntervalLiteral, sqlast.JSONLiteral:
+	case sqlast.StringLiteral:
+		return quoteString(literal.Value), nil
+	case sqlast.DateTimeLiteral:
+		return "TIMESTAMP " + quoteString(literal.Value), nil
+	case sqlast.IntervalLiteral:
+		return "INTERVAL " + quoteString(literal.Value), nil
+	case sqlast.JSONLiteral:
 		return quoteString(literal.Value), nil
 	case sqlast.BooleanLiteral:
 		return r.dialect.Boolean(strings.EqualFold(literal.Value, "true")), nil

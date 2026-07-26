@@ -111,6 +111,11 @@ type Index struct {
 	Value Expr
 	Index Expr
 }
+type Regex struct {
+	Value         Expr
+	Pattern       Expr
+	CaseSensitive bool
+}
 
 func (*Identifier) exprNode() {}
 func (*Literal) exprNode()    {}
@@ -123,6 +128,7 @@ func (*List) exprNode()       {}
 func (*Case) exprNode()       {}
 func (*Cast) exprNode()       {}
 func (*Index) exprNode()      {}
+func (*Regex) exprNode()      {}
 
 type LiteralKind uint8
 
