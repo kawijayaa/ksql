@@ -32,3 +32,4 @@ func (postgres) Series(column, from, to, step, alias string) (string, bool) {
 }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
 func (postgres) SupportsNullOrdering() bool          { return true }
+func (postgres) SupportsJoinUsing() bool             { return true }

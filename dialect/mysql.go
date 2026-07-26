@@ -32,3 +32,4 @@ func (mysql) SafeCast(_, _ string) (string, bool)        { return "", false }
 func (mysql) Series(_, _, _, _, _ string) (string, bool) { return "", false }
 func (mysql) ApplyLimit(sql, limit string) string        { return sql + " LIMIT " + limit }
 func (mysql) SupportsNullOrdering() bool                 { return false }
+func (mysql) SupportsJoinUsing() bool                    { return true }

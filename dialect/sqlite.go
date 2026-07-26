@@ -22,3 +22,4 @@ func (sqlite) SafeCast(_, _ string) (string, bool)        { return "", false }
 func (sqlite) Series(_, _, _, _, _ string) (string, bool) { return "", false }
 func (sqlite) ApplyLimit(sql, limit string) string        { return sql + " LIMIT " + limit }
 func (sqlite) SupportsNullOrdering() bool                 { return true }
+func (sqlite) SupportsJoinUsing() bool                    { return true }

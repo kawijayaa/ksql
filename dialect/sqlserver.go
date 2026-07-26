@@ -29,9 +29,10 @@ func (sqlServer) SafeCast(expression, target string) (string, bool) {
 	return "TRY_CAST(" + expression + " AS " + target + ")", true
 }
 func (sqlServer) Series(column, from, to, step, alias string) (string, bool) {
-	return "GENERATE_SERIES(" + from + ", " + to + ", " + step + ") AS " + alias + "(" + column + ")", true
+	return "(SELECT value AS " + column + " FROM GENERATE_SERIES(" + from + ", " + to + ", " + step + ")) AS " + alias, true
 }
 func (sqlServer) ApplyLimit(sql, limit string) string {
 	return strings.Replace(sql, "SELECT ", "SELECT TOP ("+limit+") ", 1)
 }
 func (sqlServer) SupportsNullOrdering() bool { return false }
+func (sqlServer) SupportsJoinUsing() bool    { return false }

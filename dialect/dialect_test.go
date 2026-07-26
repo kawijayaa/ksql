@@ -40,3 +40,33 @@ func TestDialectSyntax(t *testing.T) {
 		t.Errorf("PostgreSQL placeholder = %q", got)
 	}
 }
+
+func TestRenderSQLServerJoinKeys(t *testing.T) {
+	query := &sqlast.Select{From: &sqlast.Join{
+		Left:  &sqlast.Subquery{Query: &sqlast.Select{From: &sqlast.Table{Parts: []string{"T"}}}, Alias: "l"},
+		Right: &sqlast.Subquery{Query: &sqlast.Select{From: &sqlast.Table{Parts: []string{"U"}}}, Alias: "r"},
+		Kind:  "INNER", Using: []string{"key"},
+	}}
+	got, err := Render(SQLServer(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `SELECT * FROM (SELECT * FROM [T]) AS [l] INNER JOIN (SELECT * FROM [U]) AS [r] ON [l].[key] = [r].[key]`
+	if got != want {
+		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+}
+
+func TestRenderNullOrderingFallback(t *testing.T) {
+	query := &sqlast.Select{From: &sqlast.Table{Parts: []string{"T"}}, OrderBy: []sqlast.Order{{
+		Expr: &sqlast.Identifier{Parts: []string{"x"}}, Direction: "asc", Nulls: "last",
+	}}}
+	got, err := Render(MySQL(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "SELECT * FROM `T` ORDER BY CASE WHEN `x` IS NULL THEN 1 ELSE 0 END ASC, `x` ASC"
+	if got != want {
+		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+}

@@ -20,6 +20,7 @@ type Dialect interface {
 	Series(column, from, to, step, alias string) (string, bool)
 	ApplyLimit(selectSQL, limitSQL string) string
 	SupportsNullOrdering() bool
+	SupportsJoinUsing() bool
 }
 
 type standard struct{ name string }
@@ -48,6 +49,7 @@ func (d standard) ApplyLimit(sql, limit string) string {
 	return sql + " FETCH FIRST " + limit + " ROWS ONLY"
 }
 func (d standard) SupportsNullOrdering() bool { return true }
+func (d standard) SupportsJoinUsing() bool    { return true }
 
 // Render converts a SQL AST to one formatted query string.
 func Render(d Dialect, query sqlast.Query) (string, error) {
@@ -141,6 +143,19 @@ func (r renderer) selectQuery(query *sqlast.Select) (string, error) {
 			if err != nil {
 				return "", err
 			}
+			if order.Nulls != "" && !r.dialect.SupportsNullOrdering() {
+				nullRank, nonNullRank := "0", "1"
+				if order.Nulls == "last" {
+					nullRank, nonNullRank = "1", "0"
+				}
+				b.WriteString("CASE WHEN ")
+				b.WriteString(expr)
+				b.WriteString(" IS NULL THEN ")
+				b.WriteString(nullRank)
+				b.WriteString(" ELSE ")
+				b.WriteString(nonNullRank)
+				b.WriteString(" END ASC, ")
+			}
 			b.WriteString(expr)
 			if order.Direction != "" {
 				b.WriteByte(' ')
@@ -197,12 +212,24 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 				return "", err
 			}
 			result += " ON " + on
-		} else if len(s.Using) > 0 {
+		} else if len(s.Using) > 0 && r.dialect.SupportsJoinUsing() {
 			quoted := make([]string, len(s.Using))
 			for i, column := range s.Using {
 				quoted[i] = r.dialect.QuoteIdentifier(column)
 			}
 			result += " USING (" + strings.Join(quoted, ", ") + ")"
+		} else if len(s.Using) > 0 {
+			leftAlias, leftOK := sourceAlias(s.Left)
+			rightAlias, rightOK := sourceAlias(s.Right)
+			if !leftOK || !rightOK {
+				return "", fmt.Errorf("dialect %s requires aliases to lower join keys", r.dialect.Name())
+			}
+			conditions := make([]string, len(s.Using))
+			for i, column := range s.Using {
+				quotedColumn := r.dialect.QuoteIdentifier(column)
+				conditions[i] = r.dialect.QuoteIdentifier(leftAlias) + "." + quotedColumn + " = " + r.dialect.QuoteIdentifier(rightAlias) + "." + quotedColumn
+			}
+			result += " ON " + strings.Join(conditions, " AND ")
 		}
 		return result, nil
 	case *sqlast.Values:
@@ -242,6 +269,21 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 		return "", fmt.Errorf("dialect %s has no range-series source", r.dialect.Name())
 	default:
 		return "", fmt.Errorf("unsupported SQL source node %T", source)
+	}
+}
+
+func sourceAlias(source sqlast.Source) (string, bool) {
+	switch value := source.(type) {
+	case *sqlast.Table:
+		return value.Alias, value.Alias != ""
+	case *sqlast.Subquery:
+		return value.Alias, value.Alias != ""
+	case *sqlast.Values:
+		return value.Alias, value.Alias != ""
+	case *sqlast.Series:
+		return value.Alias, value.Alias != ""
+	default:
+		return "", false
 	}
 }
 
