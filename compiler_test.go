@@ -20,7 +20,7 @@ Events
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	want := `SELECT * FROM (SELECT * FROM (SELECT "service" AS "service", COUNT(*) AS "total", AVG("duration") AS "average" FROM (SELECT *, FLOOR("duration") AS "day" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("severity" >= 10) AND (LOWER("message") LIKE LOWER(CONCAT('%', 'error', '%'))))) AS "_k1") AS "_k2" GROUP BY "service") AS "_k3" ORDER BY "total" DESC) AS "_k4" LIMIT 5`
+	want := `SELECT * FROM (SELECT * FROM (SELECT "service" AS "service", COUNT(*) AS "total", AVG("duration") AS "average" FROM (SELECT *, FLOOR("duration") AS "day" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("severity" >= 10) AND (LOWER("message") LIKE LOWER(CONCAT('%', 'error', '%'))))) AS "_k1") AS "_k2" GROUP BY "service") AS "_k3" ORDER BY "total" DESC NULLS LAST) AS "_k4" LIMIT 5`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL =\n%s\nwant:\n%s", result.SQL, want)
 	}
@@ -100,6 +100,17 @@ func TestCompileRange(t *testing.T) {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
 	want := `SELECT * FROM generate_series(1, 5, 2) AS "_k0"("id")`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileTabularLet(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`let Active = Events | where active == true; Active | project id | sort by id`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT "id" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE ("active" = TRUE)) AS "_k1") AS "_k2" ORDER BY "id" DESC NULLS LAST`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}

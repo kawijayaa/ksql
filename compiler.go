@@ -59,18 +59,23 @@ func (c *Compiler) Compile(source string) Result {
 		return result
 	}
 
-	state := compileState{compiler: c, scalarLets: make(map[string]sqlast.Expr)}
+	state := compileState{compiler: c, scalarLets: make(map[string]sqlast.Expr), tabularLets: make(map[string]sqlast.Query)}
 	var query sqlast.Query
 	for _, statement := range tree.Statements {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
-			if node.Value == nil {
-				state.error("KQLL0101", node.Span, "operator.let", "tabular and function let bindings are not supported yet")
-				continue
-			}
-			value := state.expression(node.Value)
-			if value != nil {
-				state.scalarLets[strings.ToLower(node.Name)] = value
+			if node.Pipeline != nil {
+				value := state.pipeline(node.Pipeline)
+				if value != nil {
+					state.tabularLets[strings.ToLower(node.Name)] = value
+				}
+			} else if node.Value != nil {
+				value := state.expression(node.Value)
+				if value != nil {
+					state.scalarLets[strings.ToLower(node.Name)] = value
+				}
+			} else {
+				state.error("KQLL0101", node.Span, "statement.let", "function declarations require semantic parameter binding")
 			}
 			state.use("statement.let", "equivalent", node.Span)
 		case *kql.ControlStatement:
@@ -104,6 +109,7 @@ func (c *Compiler) Compile(source string) Result {
 type compileState struct {
 	compiler    *Compiler
 	scalarLets  map[string]sqlast.Expr
+	tabularLets map[string]sqlast.Query
 	diagnostics []Diagnostic
 	features    []FeatureUse
 	alias       int
@@ -128,6 +134,9 @@ func (s *compileState) source(source kql.Source) sqlast.Query {
 	s.use("source."+source.Kind, "equivalent", source.Span)
 	switch source.Kind {
 	case "table":
+		if bound, ok := s.tabularLets[strings.ToLower(source.Name)]; ok {
+			return bound
+		}
 		return &sqlast.Select{From: &sqlast.Table{Parts: splitName(source.Name)}}
 	case "print":
 		selectItems := s.selectItems(source.Items, true)

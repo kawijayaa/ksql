@@ -396,15 +396,20 @@ func parseOrderedList(tokens []Token) (SortSpec, []ParseError) {
 	var spec SortSpec
 	var errs []ParseError
 	for _, part := range splitTopLevel(tokens, ",") {
-		ordered := OrderedExpression{}
+		ordered := OrderedExpression{Direction: "desc", Nulls: "last"}
 		end := len(part)
+		explicitNulls := false
 		if end >= 2 && lower(part[end-2]) == "nulls" && (lower(part[end-1]) == "first" || lower(part[end-1]) == "last") {
 			ordered.Nulls = lower(part[end-1])
+			explicitNulls = true
 			end -= 2
 		}
 		if end > 0 && (lower(part[end-1]) == "asc" || lower(part[end-1]) == "desc" || lower(part[end-1]) == "granny-asc" || lower(part[end-1]) == "granny-desc") {
 			ordered.Direction = lower(part[end-1])
 			end--
+			if !explicitNulls && (ordered.Direction == "asc" || ordered.Direction == "granny-asc") {
+				ordered.Nulls = "first"
+			}
 		}
 		expr, exprErrs := parseExpressionTokens(part[:end])
 		errs = append(errs, exprErrs...)
