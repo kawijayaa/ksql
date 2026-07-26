@@ -33,3 +33,19 @@ func TestLedgerJSON(t *testing.T) {
 		t.Fatalf("JSON entries = %d, All = %d", len(entries), len(All()))
 	}
 }
+
+func TestPinnedRegistryCounts(t *testing.T) {
+	counts := make(map[string]int)
+	for _, entry := range All() {
+		counts[entry.Category]++
+	}
+	want := map[string]int{
+		"function": 397, "conversion": 24, "aggregate": 61,
+		"window": 8, "plugin": 47,
+	}
+	for category, expected := range want {
+		if counts[category] != expected {
+			t.Errorf("%s entries = %d, want %d", category, counts[category], expected)
+		}
+	}
+}

@@ -7,10 +7,10 @@ import (
 )
 
 var hyphenatedKeywords = map[string]struct{}{
-	"external-data": {}, "graph-mark-components": {}, "graph-match": {},
+	"assert-schema": {}, "external-data": {}, "graph-mark-components": {}, "graph-match": {},
 	"graph-shortest-paths": {}, "graph-to-table": {}, "graph-where-edges": {},
 	"graph-where-nodes": {}, "inline-external-table": {}, "macro-expand": {},
-	"make-graph": {}, "make-series": {}, "mv-apply": {}, "mv-expand": {},
+	"make-graph": {}, "make-series": {}, "materialized-view-combine": {}, "mv-apply": {}, "mv-expand": {},
 	"parse-kv": {}, "parse-where": {}, "project-away": {}, "project-by-names": {},
 	"project-keep": {}, "project-rename": {}, "project-reorder": {},
 	"sample-distinct": {}, "top-hitters": {}, "top-nested": {},
