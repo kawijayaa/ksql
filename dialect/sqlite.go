@@ -18,6 +18,7 @@ func (sqlite) Regex(_, _ string, _ bool) (string, bool) { return "", false }
 func (sqlite) JSONIndex(value, index string) string {
 	return "json_extract(" + value + ", '$.' || " + index + ")"
 }
-func (sqlite) SafeCast(_, _ string) (string, bool) { return "", false }
-func (sqlite) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
-func (sqlite) SupportsNullOrdering() bool          { return true }
+func (sqlite) SafeCast(_, _ string) (string, bool)        { return "", false }
+func (sqlite) Series(_, _, _, _, _ string) (string, bool) { return "", false }
+func (sqlite) ApplyLimit(sql, limit string) string        { return sql + " LIMIT " + limit }
+func (sqlite) SupportsNullOrdering() bool                 { return true }

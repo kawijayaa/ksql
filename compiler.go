@@ -132,6 +132,18 @@ func (s *compileState) source(source kql.Source) sqlast.Query {
 	case "print":
 		selectItems := s.selectItems(source.Items, true)
 		return &sqlast.Select{Projections: selectItems}
+	case "datatable":
+		columns := make([]string, len(source.Columns))
+		for i, column := range source.Columns {
+			columns[i] = column.Name
+		}
+		rows := make([][]sqlast.Expr, len(source.Rows))
+		for i, row := range source.Rows {
+			rows[i] = s.expressions(row)
+		}
+		return &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}
+	case "range":
+		return &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: s.expression(source.From), To: s.expression(source.To), Step: s.expression(source.Step), Alias: s.nextAlias()}}
 	case "expression":
 		if call, ok := source.Expr.(*kql.CallExpression); ok {
 			if table := s.entityCall(call); table != nil {

@@ -17,6 +17,7 @@ type Dialect interface {
 	Regex(left, right string, caseSensitive bool) (string, bool)
 	JSONIndex(value, index string) string
 	SafeCast(expression, target string) (string, bool)
+	Series(column, from, to, step, alias string) (string, bool)
 	ApplyLimit(selectSQL, limitSQL string) string
 	SupportsNullOrdering() bool
 }
@@ -40,6 +41,9 @@ func (d standard) JSONIndex(value, index string) string {
 	return "JSON_QUERY(" + value + ", '$.' || " + index + ")"
 }
 func (d standard) SafeCast(_, _ string) (string, bool) { return "", false }
+func (d standard) Series(_, _, _, _, _ string) (string, bool) {
+	return "", false
+}
 func (d standard) ApplyLimit(sql, limit string) string {
 	return sql + " FETCH FIRST " + limit + " ROWS ONLY"
 }
@@ -201,6 +205,41 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 			result += " USING (" + strings.Join(quoted, ", ") + ")"
 		}
 		return result, nil
+	case *sqlast.Values:
+		if len(s.Rows) == 0 {
+			return "", fmt.Errorf("values source has no rows")
+		}
+		rows := make([]string, len(s.Rows))
+		for i, row := range s.Rows {
+			values, err := r.expressions(row)
+			if err != nil {
+				return "", err
+			}
+			rows[i] = "(" + strings.Join(values, ", ") + ")"
+		}
+		columns := make([]string, len(s.Columns))
+		for i, column := range s.Columns {
+			columns[i] = r.dialect.QuoteIdentifier(column)
+		}
+		return "(VALUES " + strings.Join(rows, ", ") + ") AS " + r.dialect.QuoteIdentifier(s.Alias) + "(" + strings.Join(columns, ", ") + ")", nil
+	case *sqlast.Series:
+		from, err := r.expr(s.From)
+		if err != nil {
+			return "", err
+		}
+		to, err := r.expr(s.To)
+		if err != nil {
+			return "", err
+		}
+		step, err := r.expr(s.Step)
+		if err != nil {
+			return "", err
+		}
+		column, alias := r.dialect.QuoteIdentifier(s.Column), r.dialect.QuoteIdentifier(s.Alias)
+		if result, ok := r.dialect.Series(column, from, to, step, alias); ok {
+			return result, nil
+		}
+		return "", fmt.Errorf("dialect %s has no range-series source", r.dialect.Name())
 	default:
 		return "", fmt.Errorf("unsupported SQL source node %T", source)
 	}

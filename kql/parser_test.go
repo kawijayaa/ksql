@@ -72,6 +72,22 @@ func TestParseJoinAndUnion(t *testing.T) {
 	}
 }
 
+func TestParseDatatableAndRange(t *testing.T) {
+	script, errs := Parse(`datatable(id:long, name:string)[1, "one", 2, "two"] | union (range id from 3 to 5 step 1)`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	query := script.Statements[0].(*ExpressionStatement).Pipeline
+	if len(query.Source.Columns) != 2 || len(query.Source.Rows) != 2 {
+		t.Fatalf("datatable source = %#v", query.Source)
+	}
+	union := query.Operators[0].Body.(UnionSpec)
+	rangeSource := union.Inputs[0].Source
+	if rangeSource.Kind != "range" || rangeSource.Name != "id" {
+		t.Fatalf("range source = %#v", rangeSource)
+	}
+}
+
 func TestParseReportsUnknownOperator(t *testing.T) {
 	_, errs := Parse(`T | frobnicate a`)
 	if len(errs) != 1 || errs[0].Code != "KQLP0301" {

@@ -82,3 +82,25 @@ func TestCompileQualifiedJoin(t *testing.T) {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}
 }
+
+func TestCompileDatatable(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`datatable(id:long, name:string)[1, "one", 2, "two"] | where id > 1`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM (VALUES (1, 'one'), (2, 'two')) AS "_k0"("id", "name")) AS "_k1" WHERE ("id" > 1)`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileRange(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`range id from 1 to 5 step 2`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM generate_series(1, 5, 2) AS "_k0"("id")`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}

@@ -28,6 +28,9 @@ func (sqlServer) JSONIndex(value, index string) string {
 func (sqlServer) SafeCast(expression, target string) (string, bool) {
 	return "TRY_CAST(" + expression + " AS " + target + ")", true
 }
+func (sqlServer) Series(column, from, to, step, alias string) (string, bool) {
+	return "GENERATE_SERIES(" + from + ", " + to + ", " + step + ") AS " + alias + "(" + column + ")", true
+}
 func (sqlServer) ApplyLimit(sql, limit string) string {
 	return strings.Replace(sql, "SELECT ", "SELECT TOP ("+limit+") ", 1)
 }

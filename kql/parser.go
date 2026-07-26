@@ -129,6 +129,12 @@ func parseSource(tokens []Token) (Source, []ParseError) {
 			source.Items = items
 			return source, errs
 		}
+		if kind == "range" {
+			return parseRangeSource(source, tokens[1:])
+		}
+		if kind == "datatable" {
+			return parseDatatableSource(source, tokens[1:])
+		}
 		return source, nil
 	}
 	expr, errs := parseExpressionTokens(tokens)
@@ -138,6 +144,76 @@ func parseSource(tokens []Token) (Source, []ParseError) {
 		source.Name = name.Name
 	}
 	return source, errs
+}
+
+func parseRangeSource(source Source, tokens []Token) (Source, []ParseError) {
+	fromAt, toAt, stepAt := topLevelKeyword(tokens, "from"), topLevelKeyword(tokens, "to"), topLevelKeyword(tokens, "step")
+	if fromAt != 1 || toAt <= fromAt+1 || stepAt <= toAt+1 || stepAt == len(tokens)-1 {
+		return source, []ParseError{{Code: "KQLP0210", Message: "expected 'range name from expression to expression step expression'", Span: source.Span}}
+	}
+	source.Name = tokens[0].Text
+	var errs []ParseError
+	source.From, errs = parseExpressionTokens(tokens[fromAt+1 : toAt])
+	var expressionErrs []ParseError
+	source.To, expressionErrs = parseExpressionTokens(tokens[toAt+1 : stepAt])
+	errs = append(errs, expressionErrs...)
+	source.Step, expressionErrs = parseExpressionTokens(tokens[stepAt+1:])
+	errs = append(errs, expressionErrs...)
+	return source, errs
+}
+
+func parseDatatableSource(source Source, tokens []Token) (Source, []ParseError) {
+	if len(tokens) < 4 || tokens[0].Text != "(" {
+		return source, []ParseError{{Code: "KQLP0211", Message: "datatable requires a parenthesized schema", Span: source.Span}}
+	}
+	closeSchema := matchingClose(tokens, 0)
+	if closeSchema < 0 || closeSchema+1 >= len(tokens) || tokens[closeSchema+1].Text != "[" {
+		return source, []ParseError{{Code: "KQLP0212", Message: "datatable requires a bracketed value list", Span: source.Span}}
+	}
+	for _, definition := range splitTopLevel(tokens[1:closeSchema], ",") {
+		colon := topLevelToken(definition, ":")
+		if colon != 1 || len(definition) != 3 {
+			return source, []ParseError{{Code: "KQLP0213", Message: "expected datatable column name:type", Span: tokensSpan(definition)}}
+		}
+		source.Columns = append(source.Columns, ColumnDefinition{Name: definition[0].Text, Type: lower(definition[2])})
+	}
+	closeValues := matchingClose(tokens, closeSchema+1)
+	if closeValues < 0 {
+		return source, []ParseError{{Code: "KQLP0214", Message: "unterminated datatable value list", Span: source.Span}}
+	}
+	values, errs := parseExpressionList(tokens[closeSchema+2 : closeValues])
+	if len(source.Columns) == 0 || len(values)%len(source.Columns) != 0 {
+		errs = append(errs, ParseError{Code: "KQLP0215", Message: "datatable values must fill complete rows", Span: source.Span})
+		return source, errs
+	}
+	for len(values) > 0 {
+		source.Rows = append(source.Rows, append([]Expression(nil), values[:len(source.Columns)]...))
+		values = values[len(source.Columns):]
+	}
+	return source, errs
+}
+
+func matchingClose(tokens []Token, open int) int {
+	if open >= len(tokens) {
+		return -1
+	}
+	pairs := map[string]string{"(": ")", "[": "]", "{": "}"}
+	close, ok := pairs[tokens[open].Text]
+	if !ok {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(tokens); i++ {
+		if tokens[i].Text == tokens[open].Text {
+			depth++
+		} else if tokens[i].Text == close {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func parseOperator(tokens []Token) (Operator, []ParseError) {

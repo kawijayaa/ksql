@@ -68,6 +68,24 @@ type Join struct {
 
 func (*Join) sourceNode() {}
 
+type Values struct {
+	Columns []string
+	Rows    [][]Expr
+	Alias   string
+}
+
+func (*Values) sourceNode() {}
+
+type Series struct {
+	Column string
+	From   Expr
+	To     Expr
+	Step   Expr
+	Alias  string
+}
+
+func (*Series) sourceNode() {}
+
 // Expr is a SQL scalar expression.
 type Expr interface {
 	exprNode()
