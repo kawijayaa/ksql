@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/oka/ksql/dialect"
+	featureledger "github.com/oka/ksql/features"
 	"github.com/oka/ksql/kql"
 	"github.com/oka/ksql/sqlast"
 )
@@ -287,7 +288,7 @@ func (s *compileState) expression(expression kql.Expression) sqlast.Expr {
 func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 	left, right := s.expression(value.Left), s.expression(value.Right)
 	op := strings.ToLower(value.Operator)
-	s.use("operator.scalar."+strings.ReplaceAll(op, " ", "_"), "equivalent", value.Span)
+	s.use(scalarOperatorID(op), "equivalent", value.Span)
 	switch op {
 	case "==":
 		op = "="
@@ -472,6 +473,14 @@ func (s *compileState) nextAlias() string {
 }
 
 func (s *compileState) use(id, support string, span kql.Span) {
+	if entry, ok := featureledger.Lookup(id); ok {
+		support = string(entry.Support)
+	} else if strings.HasPrefix(id, "function.") {
+		if entry, found := featureledger.Lookup("aggregate." + strings.TrimPrefix(id, "function.")); found {
+			id = entry.ID
+			support = string(entry.Support)
+		}
+	}
 	s.features = append(s.features, FeatureUse{ID: id, Support: support, Span: span})
 }
 
@@ -544,4 +553,23 @@ func expressionText(expression kql.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func scalarOperatorID(operator string) string {
+	names := map[string]string{
+		"+": "add", "-": "subtract", "*": "multiply", "/": "divide", "%": "modulo",
+		"<": "less_than", "<=": "less_than_or_equal", ">": "greater_than", ">=": "greater_than_or_equal",
+		"==": "equal", "!=": "not_equal", "<>": "not_equal", "=~": "equal_tilde", "!~": "bang_tilde",
+		"!has": "not_has", "!has_cs": "not_has_cs", "!hasprefix": "not_hasprefix",
+		"!hasprefix_cs": "not_hasprefix_cs", "!hassuffix": "not_hassuffix",
+		"!hassuffix_cs": "not_hassuffix_cs", "!contains": "not_contains",
+		"!contains_cs": "not_contains_cs", "!startswith": "not_startswith",
+		"!startswith_cs": "not_startswith_cs", "!endswith": "not_endswith",
+		"!endswith_cs": "not_endswith_cs", "matches regex": "matches_regex",
+		"!in": "not_in", "in~": "in_cs", "!in~": "not_in_cs", "!between": "not_between",
+	}
+	if name, ok := names[operator]; ok {
+		return "operator.scalar." + name
+	}
+	return "operator.scalar." + strings.ReplaceAll(operator, " ", "_")
 }

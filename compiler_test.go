@@ -5,6 +5,7 @@ import (
 
 	"github.com/oka/ksql"
 	"github.com/oka/ksql/dialect"
+	"github.com/oka/ksql/features"
 )
 
 func TestCompilePipeline(t *testing.T) {
@@ -22,6 +23,11 @@ Events
 	want := `SELECT * FROM (SELECT * FROM (SELECT "service" AS "service", COUNT(*) AS "total", AVG("duration") AS "average" FROM (SELECT *, FLOOR("duration") AS "day" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("severity" >= 10) AND (LOWER("message") LIKE LOWER(CONCAT('%', 'error', '%'))))) AS "_k1") AS "_k2" GROUP BY "service") AS "_k3" ORDER BY "total" DESC) AS "_k4" LIMIT 5`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL =\n%s\nwant:\n%s", result.SQL, want)
+	}
+	for _, used := range result.Features {
+		if _, ok := features.Lookup(used.ID); !ok {
+			t.Errorf("runtime feature %q is absent from ledger", used.ID)
+		}
 	}
 }
 
