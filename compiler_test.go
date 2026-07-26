@@ -1,6 +1,7 @@
 package ksql_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/kawijayaa/ksql"
@@ -141,5 +142,133 @@ func TestCustomOperatorRule(t *testing.T) {
 	want := `SELECT * FROM (SELECT * FROM "T") AS "plugin_input"`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileSQLiteMvExpand(t *testing.T) {
+	result := ksql.New(dialect.SQLite()).Compile(`Events | mv-expand with_itemindex=i item=Items limit 2`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT "_k0".*, "_k1"."value" AS "item", CAST("_k1"."key" AS INTEGER) AS "i" FROM (SELECT * FROM "Events") AS "_k0" CROSS JOIN json_each(CASE WHEN "_k0"."Items" IS NULL THEN json_array(NULL) ELSE "_k0"."Items" END) AS "_k1" WHERE (CAST("_k1"."key" AS INTEGER) < 2)`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL =\n%s\nwant:\n%s", result.SQL, want)
+	}
+}
+
+func TestCompileSQLiteMvApplyFilter(t *testing.T) {
+	result := ksql.New(dialect.SQLite()).Compile(`Events | mv-apply item=Items on (where item > 1 | extend doubled=item*2)`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT *, ("item" * 2) AS "doubled" FROM (SELECT * FROM (SELECT "_k0".*, "_k1"."value" AS "item" FROM (SELECT * FROM "Events") AS "_k0" CROSS JOIN json_each(CASE WHEN "_k0"."Items" IS NULL THEN json_array(NULL) ELSE "_k0"."Items" END) AS "_k1") AS "_k2" WHERE ("item" > 1)) AS "_k3"`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL =\n%s\nwant:\n%s", result.SQL, want)
+	}
+}
+
+func TestCompileMvExpandRequiresReplacementSchema(t *testing.T) {
+	result := ksql.New(dialect.SQLite()).Compile(`Events | mv-expand Items`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0333" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
+func TestCompileMvApplyRejectsNonRowwiseSubquery(t *testing.T) {
+	result := ksql.New(dialect.SQLite()).Compile(`Events | mv-apply item=Items on (top 2 by item)`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0334" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
+func TestCompileSampleOperators(t *testing.T) {
+	sample := ksql.New(dialect.SQLite()).Compile(`Events | sample 2`)
+	if !sample.OK() || sample.SQL != `SELECT * FROM (SELECT * FROM "Events") AS "_k0" ORDER BY RANDOM() LIMIT 2` {
+		t.Fatalf("sample Compile() = %#v", sample)
+	}
+	distinct := ksql.New(dialect.MySQL()).Compile(`Events | sample-distinct 2 of state`)
+	if !distinct.OK() {
+		t.Fatalf("sample-distinct diagnostics = %#v", distinct.Diagnostics)
+	}
+	want := "SELECT * FROM (SELECT DISTINCT `state` FROM (SELECT * FROM `Events`) AS `_k0`) AS `_k1` ORDER BY RAND() LIMIT 2"
+	if distinct.SQL != want {
+		t.Fatalf("sample-distinct SQL = %q, want %q", distinct.SQL, want)
+	}
+}
+
+func TestCompileCaseInsensitiveMembership(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`Events | where state in~ ("wa", "or")`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (LOWER("state") IN (LOWER('wa'), LOWER('or')))`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileTermOperators(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`Events | where state has "New" and code !hasprefix_cs "ERR"`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("state" ~* '(^|[^[:alnum:]])New([^[:alnum:]]|$)') AND NOT ("code" ~ '(^|[^[:alnum:]])ERR[[:alnum:]]*'))`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+func TestCompileTermOperatorRequiresRegex(t *testing.T) {
+	result := ksql.New(dialect.SQLite()).Compile(`Events | where state has "New"`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0404" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
+func TestCompileTermOperatorRejectsNonTermLiteral(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`Events | where RawData has "target-string"`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0404" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
+func TestCompileAsAlias(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`T | as LeftSide | join kind=inner (LeftSide) on id`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM "T") AS "_k1" USING ("id")`
+	if result.SQL != want {
+		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
+	}
+}
+
+type customDialect struct{}
+
+func (customDialect) Name() string                        { return "custom" }
+func (customDialect) QuoteIdentifier(value string) string { return `"` + value + `"` }
+func (customDialect) Placeholder(index int) string        { return fmt.Sprintf("$%d", index) }
+func (customDialect) Boolean(value bool) string {
+	if value {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+func (customDialect) Regex(_, _ string, _ bool) (string, bool) { return "", false }
+func (customDialect) JSONIndex(value, index string) string     { return value + "[" + index + "]" }
+func (customDialect) SafeCast(_, _ string) (string, bool)      { return "", false }
+func (customDialect) Series(_, _, _, _, _ string) (string, bool) {
+	return "", false
+}
+func (customDialect) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
+func (customDialect) SupportsNullOrdering() bool          { return true }
+func (customDialect) SupportsJoinUsing() bool             { return true }
+
+var _ dialect.Dialect = customDialect{}
+
+func TestOptionalDialectCapabilitiesRemainOptional(t *testing.T) {
+	result := ksql.New(customDialect{}).Compile(`T | sample 1`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0305" {
+		t.Fatalf("Compile() = %#v", result)
 	}
 }

@@ -94,3 +94,51 @@ func TestParseReportsUnknownOperator(t *testing.T) {
 		t.Fatalf("Parse() errors = %#v", errs)
 	}
 }
+
+func TestParseMultiValueOperators(t *testing.T) {
+	script, errs := Parse(`T
+| mv-expand with_itemindex=i item=items to typeof(long) limit 2
+| mv-apply value=values on (where value > 1 | extend doubled=value*2)`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	operators := script.Statements[0].(*ExpressionStatement).Pipeline.Operators
+	expand := operators[0].Body.(MvExpandSpec)
+	if expand.ItemIndex != "i" || len(expand.Items) != 1 || expand.Items[0].Name != "item" || expand.Items[0].Type != "long" || expand.Limit == nil {
+		t.Fatalf("mv-expand = %#v", expand)
+	}
+	apply := operators[1].Body.(MvApplySpec)
+	if len(apply.Items) != 1 || apply.Items[0].Name != "value" || len(apply.Operators) != 2 {
+		t.Fatalf("mv-apply = %#v", apply)
+	}
+	if apply.Operators[0].Kind != "where" || apply.Operators[1].Kind != "extend" {
+		t.Fatalf("mv-apply operators = %#v", apply.Operators)
+	}
+}
+
+func TestParseSampleDistinctAndAs(t *testing.T) {
+	script, errs := Parse(`T | sample-distinct 3 of state | as hint.materialized=false Sampled`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	operators := script.Statements[0].(*ExpressionStatement).Pipeline.Operators
+	if _, ok := operators[0].Body.(SampleDistinctSpec); !ok {
+		t.Fatalf("sample-distinct body = %T", operators[0].Body)
+	}
+	as := operators[1].Body.(AsSpec)
+	if as.Name != "Sampled" || as.Materialized == nil || *as.Materialized {
+		t.Fatalf("as = %#v", as)
+	}
+}
+
+func TestParseLegacyMvExpandLimit(t *testing.T) {
+	script, errs := Parse(`T | mvexpand item=items`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	spec := script.Statements[0].(*ExpressionStatement).Pipeline.Operators[0].Body.(MvExpandSpec)
+	limit, ok := spec.Limit.(*LiteralExpression)
+	if !spec.Legacy || !ok || limit.Text != "128" {
+		t.Fatalf("mvexpand = %#v", spec)
+	}
+}

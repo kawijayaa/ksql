@@ -86,6 +86,14 @@ type Series struct {
 
 func (*Series) sourceNode() {}
 
+// JSONEach expands one JSON array value into value/key rows.
+type JSONEach struct {
+	Value Expr
+	Alias string
+}
+
+func (*JSONEach) sourceNode() {}
+
 // Expr is a SQL scalar expression.
 type Expr interface {
 	exprNode()
@@ -98,6 +106,8 @@ type Literal struct {
 }
 type Parameter struct{ Index int }
 type Star struct{}
+type QualifiedStar struct{ Parts []string }
+type Random struct{}
 type Unary struct {
 	Operator string
 	Operand  Expr
@@ -135,18 +145,20 @@ type Regex struct {
 	CaseSensitive bool
 }
 
-func (*Identifier) exprNode() {}
-func (*Literal) exprNode()    {}
-func (*Parameter) exprNode()  {}
-func (*Star) exprNode()       {}
-func (*Unary) exprNode()      {}
-func (*Binary) exprNode()     {}
-func (*Call) exprNode()       {}
-func (*List) exprNode()       {}
-func (*Case) exprNode()       {}
-func (*Cast) exprNode()       {}
-func (*Index) exprNode()      {}
-func (*Regex) exprNode()      {}
+func (*Identifier) exprNode()    {}
+func (*Literal) exprNode()       {}
+func (*Parameter) exprNode()     {}
+func (*Star) exprNode()          {}
+func (*QualifiedStar) exprNode() {}
+func (*Random) exprNode()        {}
+func (*Unary) exprNode()         {}
+func (*Binary) exprNode()        {}
+func (*Call) exprNode()          {}
+func (*List) exprNode()          {}
+func (*Case) exprNode()          {}
+func (*Cast) exprNode()          {}
+func (*Index) exprNode()         {}
+func (*Regex) exprNode()         {}
 
 type LiteralKind uint8
 

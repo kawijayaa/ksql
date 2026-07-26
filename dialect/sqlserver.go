@@ -31,6 +31,8 @@ func (sqlServer) SafeCast(expression, target string) (string, bool) {
 func (sqlServer) Series(column, from, to, step, alias string) (string, bool) {
 	return "(SELECT value AS " + column + " FROM GENERATE_SERIES(" + from + ", " + to + ", " + step + ")) AS " + alias, true
 }
+func (sqlServer) JSONEach(_, _ string) (string, bool) { return "", false }
+func (sqlServer) Random() (string, bool)              { return "NEWID()", true }
 func (sqlServer) ApplyLimit(sql, limit string) string {
 	return strings.Replace(sql, "SELECT ", "SELECT TOP ("+limit+") ", 1)
 }

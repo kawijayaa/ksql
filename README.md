@@ -43,7 +43,11 @@ The built-in relational compiler currently lowers:
 
 - `where`/`filter`, `project`, `extend`, `summarize`, and `distinct`
 - `count`, `sort`/`order`, `take`/`limit`, and `top`
+- `sample`, `sample-distinct`, and reusable pipeline aliases with `as`
 - `join`/`lookup` relational kinds and `union`
+- single-array SQLite `mv-expand` and row-wise `mv-apply` subqueries using
+  `where`, `extend`, and `serialize`; unsupported replacement, multi-array,
+  and aggregating forms return diagnostics
 - scalar and tabular `let` bindings
 - table, `print`, `datatable`, and dialect-capable `range` sources
 - arithmetic, comparisons, Boolean logic, membership, ranges, substring
@@ -54,6 +58,9 @@ Every operator and built-in registry entry from the pinned Microsoft source is
 recorded by the `features` package. Recognized features that cannot be
 represented safely in the selected SQL dialect return a source-located stable
 diagnostic. They never become an unchecked SQL function call.
+
+See [`docs/operator-support.md`](docs/operator-support.md) for dialect-specific
+operator behavior and current multi-value expansion limits.
 
 Applications can explicitly supply database extensions or UDF mappings with
 `WithFunction`, `WithOperator`, and `WithSource`. See

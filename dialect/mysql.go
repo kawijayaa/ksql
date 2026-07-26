@@ -30,6 +30,8 @@ func (mysql) JSONIndex(value, index string) string {
 }
 func (mysql) SafeCast(_, _ string) (string, bool)        { return "", false }
 func (mysql) Series(_, _, _, _, _ string) (string, bool) { return "", false }
+func (mysql) JSONEach(_, _ string) (string, bool)        { return "", false }
+func (mysql) Random() (string, bool)                     { return "RAND()", true }
 func (mysql) ApplyLimit(sql, limit string) string        { return sql + " LIMIT " + limit }
 func (mysql) SupportsNullOrdering() bool                 { return false }
 func (mysql) SupportsJoinUsing() bool                    { return true }

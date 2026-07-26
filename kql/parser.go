@@ -241,7 +241,7 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		body = body[1:]
 	}
 	switch kind {
-	case "where", "take", "sample", "sample-distinct":
+	case "where", "take", "sample":
 		expr, errs := parseExpressionTokens(body)
 		op.Body = ExpressionSpec{Expressions: []Expression{expr}}
 		return op, errs
@@ -261,6 +261,14 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		return parseJoin(op, body)
 	case "union":
 		return parseUnion(op, body)
+	case "mv-expand":
+		return parseMvExpand(op, body)
+	case "mv-apply":
+		return parseMvApply(op, body)
+	case "as":
+		return parseAs(op, body)
+	case "sample-distinct":
+		return parseSampleDistinct(op, body)
 	case "count":
 		op.Body = RawSpec{Tokens: body}
 		return op, nil
@@ -268,6 +276,165 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		op.Body = RawSpec{Tokens: body}
 		return op, nil
 	}
+}
+
+func parseMvExpand(op Operator, tokens []Token) (Operator, []ParseError) {
+	spec, errs := parseMvExpansions(tokens, true)
+	spec.Legacy = len(op.Raw) > 0 && lower(op.Raw[0]) == "mvexpand"
+	if spec.Legacy && spec.Limit == nil {
+		spec.Limit = &LiteralExpression{Text: "128", Kind: NumberToken, Span: op.Span}
+	}
+	op.Body = spec
+	return op, errs
+}
+
+func parseMvApply(op Operator, tokens []Token) (Operator, []ParseError) {
+	on := topLevelKeyword(tokens, "on")
+	if on < 0 || on == len(tokens)-1 {
+		op.Body = MvApplySpec{}
+		return op, []ParseError{{Code: "KQLP0330", Message: "mv-apply requires an on (...) subquery", Span: op.Span}}
+	}
+	inner := trimParentheses(tokens[on+1:])
+	if len(inner) == len(tokens[on+1:]) || len(inner) == 0 {
+		op.Body = MvApplySpec{}
+		return op, []ParseError{{Code: "KQLP0330", Message: "mv-apply requires an on (...) subquery", Span: op.Span}}
+	}
+	expand, errs := parseMvExpansions(tokens[:on], false)
+	spec := MvApplySpec{ItemIndex: expand.ItemIndex, Items: expand.Items, Limit: expand.Limit}
+	for _, part := range splitTopLevel(inner, "|") {
+		if len(part) == 0 {
+			continue
+		}
+		operator, operatorErrs := parseOperator(part)
+		spec.Operators = append(spec.Operators, operator)
+		errs = append(errs, operatorErrs...)
+	}
+	if len(spec.Operators) == 0 {
+		errs = append(errs, ParseError{Code: "KQLP0331", Message: "mv-apply subquery must contain an operator", Span: op.Span})
+	}
+	op.Body = spec
+	return op, errs
+}
+
+func parseMvExpansions(tokens []Token, allowKind bool) (MvExpandSpec, []ParseError) {
+	spec := MvExpandSpec{Kind: "bag"}
+	var errs []ParseError
+	position := 0
+	for position+2 < len(tokens) && tokens[position+1].Text == "=" {
+		name, value := lower(tokens[position]), lower(tokens[position+2])
+		recognized := true
+		switch name {
+		case "with_itemindex":
+			if tokens[position+2].Kind != IdentifierToken {
+				errs = append(errs, ParseError{Code: "KQLP0332", Message: "with_itemindex requires a column name", Span: tokens[position+2].Span})
+			} else {
+				spec.ItemIndex = tokens[position+2].Text
+			}
+		case "kind", "bagexpansion":
+			if !allowKind {
+				recognized = false
+			} else if value != "bag" && value != "array" {
+				errs = append(errs, ParseError{Code: "KQLP0332", Message: "unsupported multi-value expansion parameter", Span: tokens[position].Span})
+			} else {
+				spec.Kind = value
+			}
+		default:
+			recognized = false
+		}
+		if !recognized {
+			break
+		}
+		position += 3
+	}
+	if position >= len(tokens) {
+		errs = append(errs, ParseError{Code: "KQLP0333", Message: "multi-value expansion requires an expression", Span: tokensSpan(tokens)})
+		return spec, errs
+	}
+	tokens = tokens[position:]
+	if limit := topLevelKeyword(tokens, "limit"); limit >= 0 {
+		if limit == len(tokens)-1 {
+			errs = append(errs, ParseError{Code: "KQLP0334", Message: "limit requires a row count", Span: tokens[limit].Span})
+		} else {
+			var limitErrs []ParseError
+			spec.Limit, limitErrs = parseExpressionTokens(tokens[limit+1:])
+			errs = append(errs, limitErrs...)
+		}
+		tokens = tokens[:limit]
+	}
+	for _, part := range splitTopLevel(tokens, ",") {
+		if len(part) == 0 {
+			continue
+		}
+		item := MvExpansion{Span: tokensSpan(part)}
+		expressionTokens := part
+		if to := topLevelKeyword(part, "to"); to >= 0 {
+			expressionTokens = part[:to]
+			typeTokens := part[to+1:]
+			if len(typeTokens) != 4 || lower(typeTokens[0]) != "typeof" || typeTokens[1].Text != "(" || typeTokens[3].Text != ")" {
+				errs = append(errs, ParseError{Code: "KQLP0335", Message: "expected to typeof(type)", Span: tokensSpan(part[to:])})
+			} else {
+				item.Type = lower(typeTokens[2])
+			}
+		}
+		if equal := topLevelToken(expressionTokens, "="); equal >= 0 {
+			if equal != 1 || expressionTokens[0].Kind != IdentifierToken {
+				errs = append(errs, ParseError{Code: "KQLP0336", Message: "expected name = array expression", Span: tokensSpan(expressionTokens)})
+				continue
+			}
+			item.Name = expressionTokens[0].Text
+			expressionTokens = expressionTokens[2:]
+		}
+		expression, expressionErrs := parseExpressionTokens(expressionTokens)
+		item.Expression = expression
+		errs = append(errs, expressionErrs...)
+		if item.Name == "" {
+			if name, ok := expression.(*NameExpression); ok {
+				item.Name = name.Name
+			}
+		}
+		spec.Items = append(spec.Items, item)
+	}
+	if len(spec.Items) == 0 {
+		errs = append(errs, ParseError{Code: "KQLP0333", Message: "multi-value expansion requires an expression", Span: tokensSpan(tokens)})
+	}
+	return spec, errs
+}
+
+func parseAs(op Operator, tokens []Token) (Operator, []ParseError) {
+	spec := AsSpec{}
+	position := 0
+	if len(tokens) >= 5 && lower(tokens[0]) == "hint" && tokens[1].Text == "." && lower(tokens[2]) == "materialized" && tokens[3].Text == "=" {
+		value := lower(tokens[4])
+		if value != "true" && value != "false" {
+			op.Body = spec
+			return op, []ParseError{{Code: "KQLP0337", Message: "hint.materialized must be true or false", Span: tokens[4].Span}}
+		}
+		materialized := value == "true"
+		spec.Materialized = &materialized
+		position = 5
+	}
+	if position >= len(tokens) || tokens[position].Kind != IdentifierToken || position != len(tokens)-1 {
+		op.Body = spec
+		return op, []ParseError{{Code: "KQLP0338", Message: "as requires one alias name", Span: op.Span}}
+	}
+	spec.Name = tokens[position].Text
+	op.Body = spec
+	return op, nil
+}
+
+func parseSampleDistinct(op Operator, tokens []Token) (Operator, []ParseError) {
+	of := topLevelKeyword(tokens, "of")
+	if of <= 0 || of == len(tokens)-1 {
+		op.Body = SampleDistinctSpec{}
+		return op, []ParseError{{Code: "KQLP0339", Message: "expected sample-distinct count of column", Span: op.Span}}
+	}
+	count, errs := parseExpressionTokens(tokens[:of])
+	column, columnErrs := parseExpressionTokens(tokens[of+1:])
+	if _, ok := column.(*NameExpression); !ok {
+		columnErrs = append(columnErrs, ParseError{Code: "KQLP0340", Message: "sample-distinct requires a column name", Span: tokensSpan(tokens[of+1:])})
+	}
+	op.Body = SampleDistinctSpec{Count: count, Column: column}
+	return op, append(errs, columnErrs...)
 }
 
 func parseJoin(op Operator, tokens []Token) (Operator, []ParseError) {

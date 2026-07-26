@@ -122,15 +122,46 @@ type UnionSpec struct {
 	Kind   string
 	Inputs []*Pipeline
 }
+type MvExpansion struct {
+	Name       string
+	Expression Expression
+	Type       string
+	Span       Span
+}
+type MvExpandSpec struct {
+	Kind      string
+	ItemIndex string
+	Items     []MvExpansion
+	Limit     Expression
+	Legacy    bool
+}
+type MvApplySpec struct {
+	ItemIndex string
+	Items     []MvExpansion
+	Limit     Expression
+	Operators []Operator
+}
+type AsSpec struct {
+	Name         string
+	Materialized *bool
+}
+type SampleDistinctSpec struct {
+	Count  Expression
+	Column Expression
+}
 type RawSpec struct{ Tokens []Token }
 
-func (ExpressionSpec) operatorBody() {}
-func (SummarizeSpec) operatorBody()  {}
-func (SortSpec) operatorBody()       {}
-func (TopSpec) operatorBody()        {}
-func (JoinSpec) operatorBody()       {}
-func (UnionSpec) operatorBody()      {}
-func (RawSpec) operatorBody()        {}
+func (ExpressionSpec) operatorBody()     {}
+func (SummarizeSpec) operatorBody()      {}
+func (SortSpec) operatorBody()           {}
+func (TopSpec) operatorBody()            {}
+func (JoinSpec) operatorBody()           {}
+func (UnionSpec) operatorBody()          {}
+func (MvExpandSpec) operatorBody()       {}
+func (MvApplySpec) operatorBody()        {}
+func (AsSpec) operatorBody()             {}
+func (SampleDistinctSpec) operatorBody() {}
+func (RawSpec) operatorBody()            {}
 
 // Expression is a scalar KQL expression.
 type Expression interface {

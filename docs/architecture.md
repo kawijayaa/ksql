@@ -29,9 +29,9 @@ The library therefore distinguishes:
 - **Semantic support:** translation is exact, equivalent, lossy, or unsupported.
 
 Lossy behavior is documented rather than presented as equivalent. For example,
-KQL `has` uses term-index semantics and is not silently rewritten to SQL
-`LIKE`; approximate `dcount` is not silently changed to exact
-`COUNT(DISTINCT ...)`.
+KQL `has` is lowered only for literal terms on regex-capable dialects and is
+never silently rewritten to SQL `LIKE`; approximate `dcount` is not silently
+changed to exact `COUNT(DISTINCT ...)`.
 
 ## Extension rules
 

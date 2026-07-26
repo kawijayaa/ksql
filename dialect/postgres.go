@@ -30,6 +30,8 @@ func (postgres) SafeCast(_, _ string) (string, bool)  { return "", false }
 func (postgres) Series(column, from, to, step, alias string) (string, bool) {
 	return "generate_series(" + from + ", " + to + ", " + step + ") AS " + alias + "(" + column + ")", true
 }
+func (postgres) JSONEach(_, _ string) (string, bool) { return "", false }
+func (postgres) Random() (string, bool)              { return "RANDOM()", true }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
 func (postgres) SupportsNullOrdering() bool          { return true }
 func (postgres) SupportsJoinUsing() bool             { return true }

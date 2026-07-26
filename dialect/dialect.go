@@ -267,6 +267,20 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 			return result, nil
 		}
 		return "", fmt.Errorf("dialect %s has no range-series source", r.dialect.Name())
+	case *sqlast.JSONEach:
+		value, err := r.expr(s.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			JSONEach(string, string) (string, bool)
+		}); ok {
+			result, supported := capability.JSONEach(value, r.dialect.QuoteIdentifier(s.Alias))
+			if supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no JSON array expansion", r.dialect.Name())
 	default:
 		return "", fmt.Errorf("unsupported SQL source node %T", source)
 	}
@@ -301,6 +315,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		return r.dialect.Placeholder(e.Index), nil
 	case *sqlast.Star:
 		return "*", nil
+	case *sqlast.QualifiedStar:
+		parts := make([]string, len(e.Parts))
+		for i, part := range e.Parts {
+			parts[i] = r.dialect.QuoteIdentifier(part)
+		}
+		return strings.Join(parts, ".") + ".*", nil
+	case *sqlast.Random:
+		if capability, ok := r.dialect.(interface{ Random() (string, bool) }); ok {
+			if value, supported := capability.Random(); supported {
+				return value, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no random ordering expression", r.dialect.Name())
 	case *sqlast.Unary:
 		operand, err := r.expr(e.Operand)
 		return e.Operator + operand, err

@@ -70,3 +70,47 @@ func TestRenderNullOrderingFallback(t *testing.T) {
 		t.Fatalf("Render() = %q, want %q", got, want)
 	}
 }
+
+func TestRandomExpressions(t *testing.T) {
+	tests := []struct {
+		name string
+		d    Dialect
+		want string
+	}{
+		{name: "postgresql", d: PostgreSQL(), want: "RANDOM()"},
+		{name: "sqlite", d: SQLite(), want: "RANDOM()"},
+		{name: "mysql", d: MySQL(), want: "RAND()"},
+		{name: "sqlserver", d: SQLServer(), want: "NEWID()"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := Render(test.d, &sqlast.Select{From: &sqlast.Table{Parts: []string{"T"}}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "SELECT * FROM " + test.d.QuoteIdentifier("T") + " ORDER BY " + test.want
+			if got != want {
+				t.Fatalf("Render() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSQLiteJSONEach(t *testing.T) {
+	query := &sqlast.Select{From: &sqlast.Join{
+		Left: &sqlast.Table{Parts: []string{"T"}, Alias: "t"},
+		Right: &sqlast.JSONEach{
+			Value: &sqlast.Identifier{Parts: []string{"t", "items"}},
+			Alias: "j",
+		},
+		Kind: "CROSS",
+	}}
+	got, err := Render(SQLite(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `SELECT * FROM "T" AS "t" CROSS JOIN json_each(CASE WHEN "t"."items" IS NULL THEN json_array(NULL) ELSE "t"."items" END) AS "j"`
+	if got != want {
+		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+}

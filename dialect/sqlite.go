@@ -20,6 +20,11 @@ func (sqlite) JSONIndex(value, index string) string {
 }
 func (sqlite) SafeCast(_, _ string) (string, bool)        { return "", false }
 func (sqlite) Series(_, _, _, _, _ string) (string, bool) { return "", false }
-func (sqlite) ApplyLimit(sql, limit string) string        { return sql + " LIMIT " + limit }
-func (sqlite) SupportsNullOrdering() bool                 { return true }
-func (sqlite) SupportsJoinUsing() bool                    { return true }
+func (sqlite) JSONEach(value, alias string) (string, bool) {
+	value = "CASE WHEN " + value + " IS NULL THEN json_array(NULL) ELSE " + value + " END"
+	return "json_each(" + value + ") AS " + alias, true
+}
+func (sqlite) Random() (string, bool)              { return "RANDOM()", true }
+func (sqlite) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
+func (sqlite) SupportsNullOrdering() bool          { return true }
+func (sqlite) SupportsJoinUsing() bool             { return true }

@@ -129,6 +129,9 @@ func (l *lexer) scanIdentifier(start, line, column int) {
 		}
 		l.advanceRune()
 	}
+	if l.offset < len(l.source) && l.source[l.offset] == '~' && strings.EqualFold(l.source[start:l.offset], "in") {
+		l.advanceRune()
+	}
 
 	// Hyphens are part of a token only for grammar-defined compound keywords.
 	if l.offset < len(l.source) && l.source[l.offset] == '-' {

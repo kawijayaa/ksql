@@ -12,7 +12,8 @@ func TestEveryQueryOperatorParsesAsRecognized(t *testing.T) {
 		"project-rename": true, "project-reorder": true, "extend": true,
 		"distinct": true, "serialize": true, "summarize": true, "sort": true,
 		"order": true, "top": true, "join": true, "lookup": true,
-		"union": true, "count": true,
+		"union": true, "count": true, "mv-expand": true, "mvexpand": true,
+		"mv-apply": true, "mvapply": true, "as": true,
 	}
 	for name := range queryOperators {
 		if typed[name] {

@@ -270,7 +270,8 @@ const coreEquivalent = `
 source.table source.print source.range source.datatable statement.let statement.expression
 operator.where operator.project operator.extend operator.summarize
 operator.distinct operator.count operator.sort operator.take operator.top
-operator.join operator.lookup operator.union
+operator.join operator.lookup operator.union operator.as operator.sample
+operator.sample-distinct
 operator.scalar.and operator.scalar.or operator.scalar.add
 operator.scalar.subtract operator.scalar.multiply operator.scalar.divide
 operator.scalar.modulo operator.scalar.less_than operator.scalar.less_than_or_equal
@@ -282,7 +283,13 @@ operator.scalar.startswith operator.scalar.startswith_cs
 operator.scalar.not_startswith operator.scalar.not_startswith_cs
 operator.scalar.endswith operator.scalar.endswith_cs operator.scalar.not_endswith
 operator.scalar.not_endswith_cs operator.scalar.matches_regex operator.scalar.in
-operator.scalar.not_in operator.scalar.between operator.scalar.not_between
+operator.scalar.not_in operator.scalar.in_cs operator.scalar.not_in_cs
+operator.scalar.between operator.scalar.not_between
+operator.scalar.has operator.scalar.has_cs operator.scalar.not_has
+operator.scalar.not_has_cs operator.scalar.hasprefix operator.scalar.hasprefix_cs
+operator.scalar.not_hasprefix operator.scalar.not_hasprefix_cs
+operator.scalar.hassuffix operator.scalar.hassuffix_cs operator.scalar.not_hassuffix
+operator.scalar.not_hassuffix_cs operator.scalar.has_any operator.scalar.has_all
 function.iif function.iff function.case function.strcat function.strlen
 function.tolower function.toupper function.substring function.count function.sum
 function.sumif function.countif function.avg function.min function.max
@@ -295,7 +302,8 @@ aggregate.min aggregate.max
 `
 
 const coreLossy = `
-operator.serialize function.toint function.tolong function.toreal
+operator.serialize operator.mv-expand operator.mv-apply
+function.toint function.tolong function.toreal
 function.todouble function.todatetime function.todecimal function.tobool
 function.toboolean function.toguid
 `

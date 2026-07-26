@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/kawijayaa/ksql/dialect"
 	featureledger "github.com/kawijayaa/ksql/features"
@@ -126,6 +127,7 @@ type compileState struct {
 	features    []FeatureUse
 	alias       int
 	qualifiers  map[string]string
+	qualifier   string
 }
 
 func (s *compileState) pipeline(pipeline *kql.Pipeline) sqlast.Query {
@@ -225,6 +227,21 @@ func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlas
 	if operator.Kind == "union" {
 		return s.union(input, operator)
 	}
+	if operator.Kind == "mv-expand" {
+		return s.mvExpand(input, operator.Body.(kql.MvExpandSpec), operator)
+	}
+	if operator.Kind == "mv-apply" {
+		return s.mvApply(input, operator.Body.(kql.MvApplySpec), operator)
+	}
+	if operator.Kind == "as" {
+		spec := operator.Body.(kql.AsSpec)
+		if spec.Materialized != nil && *spec.Materialized {
+			s.error("KQLL0306", operator.Span, feature, "as hint.materialized=true requires guaranteed single evaluation")
+			return nil
+		}
+		s.tabularLets[strings.ToLower(spec.Name)] = input
+		return input
+	}
 	from := &sqlast.Subquery{Query: input, Alias: s.nextAlias()}
 	switch operator.Kind {
 	case "where":
@@ -266,6 +283,21 @@ func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlas
 	case "top":
 		spec := operator.Body.(kql.TopSpec)
 		return &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: s.expression(spec.By.Expression), Direction: spec.By.Direction, Nulls: spec.By.Nulls}}, Limit: s.expression(spec.Count)}
+	case "sample":
+		if !supportsRandom(s.compiler.dialect) {
+			s.error("KQLL0305", operator.Span, feature, "dialect "+s.compiler.dialect.Name()+" has no random sampling expression")
+			return nil
+		}
+		spec := operator.Body.(kql.ExpressionSpec)
+		return &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Expressions[0])}
+	case "sample-distinct":
+		if !supportsRandom(s.compiler.dialect) {
+			s.error("KQLL0305", operator.Span, feature, "dialect "+s.compiler.dialect.Name()+" has no random sampling expression")
+			return nil
+		}
+		spec := operator.Body.(kql.SampleDistinctSpec)
+		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: s.expression(spec.Column)}}}
+		return &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count)}
 	case "serialize":
 		s.warn("KQLL0301", operator.Span, feature, "serialize metadata is unnecessary in SQL; row order still requires an explicit sort")
 		return &sqlast.Select{From: from}
@@ -326,6 +358,8 @@ func (s *compileState) expression(expression kql.Expression) sqlast.Expr {
 			if qualifier, ok := s.qualifiers[strings.ToLower(parts[0])]; ok {
 				parts[0] = qualifier
 			}
+		} else if len(parts) == 1 && s.qualifier != "" {
+			parts = append([]string{s.qualifier}, parts...)
 		}
 		return &sqlast.Identifier{Parts: parts}
 	case *kql.LiteralExpression:
@@ -435,6 +469,125 @@ func (s *compileState) union(input sqlast.Query, operator kql.Operator) sqlast.Q
 	return &sqlast.Union{All: true, Queries: queries}
 }
 
+func (s *compileState) mvExpand(input sqlast.Query, spec kql.MvExpandSpec, operator kql.Operator) sqlast.Query {
+	return s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
+}
+
+func (s *compileState) mvApply(input sqlast.Query, spec kql.MvApplySpec, operator kql.Operator) sqlast.Query {
+	query := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
+	if query == nil {
+		return nil
+	}
+	for _, inner := range spec.Operators {
+		switch inner.Kind {
+		case "where", "extend", "serialize":
+			query = s.operator(query, inner)
+		default:
+			s.error("KQLL0334", inner.Span, "operator.mv-apply."+inner.Kind, "SQLite mv-apply currently supports where, extend, and serialize subqueries")
+			return nil
+		}
+		if query == nil {
+			return nil
+		}
+	}
+	return query
+}
+
+func (s *compileState) expandJSON(input sqlast.Query, items []kql.MvExpansion, itemIndex string, limit kql.Expression, operator kql.Operator) sqlast.Query {
+	if !supportsJSONEach(s.compiler.dialect) {
+		s.error("KQLL0330", operator.Span, "operator."+operator.Kind, "dialect "+s.compiler.dialect.Name()+" has no JSON array expansion")
+		return nil
+	}
+	if len(items) != 1 {
+		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" currently requires exactly one array expression")
+		return nil
+	}
+	item := items[0]
+	sourceName := ""
+	if name, ok := item.Expression.(*kql.NameExpression); ok {
+		sourceName = name.Name
+	}
+	if item.Name == "" {
+		s.error("KQLL0332", item.Span, "operator."+operator.Kind, operator.Kind+" requires an explicit output name for non-column expressions")
+		return nil
+	}
+	if strings.EqualFold(item.Name, sourceName) {
+		s.error("KQLL0333", item.Span, "operator."+operator.Kind, "SQLite cannot replace a column during JSON expansion without the input schema; use a distinct output alias")
+		return nil
+	}
+
+	inputAlias, expansionAlias := s.nextAlias(), s.nextAlias()
+	previousQualifier := s.qualifier
+	s.qualifier = inputAlias
+	value := s.expression(item.Expression)
+	s.qualifier = previousQualifier
+	expansion := &sqlast.JSONEach{Value: value, Alias: expansionAlias}
+	from := &sqlast.Join{
+		Left:  &sqlast.Subquery{Query: input, Alias: inputAlias},
+		Right: expansion,
+		Kind:  "CROSS",
+	}
+	element := sqlast.Expr(&sqlast.Identifier{Parts: []string{expansionAlias, "value"}})
+	if item.Type != "" {
+		types := map[string]string{
+			"long": "BIGINT", "int": "INTEGER", "real": "DOUBLE PRECISION", "double": "DOUBLE PRECISION",
+			"decimal": "DECIMAL", "string": "VARCHAR", "bool": "BOOLEAN", "boolean": "BOOLEAN",
+			"datetime": "TIMESTAMP", "guid": "UUID",
+		}
+		target, ok := types[item.Type]
+		if !ok {
+			s.error("KQLL0335", item.Span, "operator."+operator.Kind, "unsupported expansion type "+item.Type)
+			return nil
+		}
+		s.warn("KQLL0336", item.Span, "operator."+operator.Kind, "SQLite casts invalid expanded values instead of returning null")
+		element = &sqlast.Cast{Expr: element, Type: target}
+	}
+	projections := []sqlast.SelectItem{
+		{Expr: &sqlast.QualifiedStar{Parts: []string{inputAlias}}},
+		{Expr: element, Alias: item.Name},
+	}
+	if itemIndex != "" {
+		projections = append(projections, sqlast.SelectItem{
+			Expr:  &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
+			Alias: itemIndex,
+		})
+	}
+	query := &sqlast.Select{From: from, Projections: projections}
+	if limit != nil {
+		query.Where = &sqlast.Binary{
+			Left:     &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
+			Operator: "<",
+			Right:    s.expression(limit),
+		}
+	}
+	return query
+}
+
+func supportsRandom(target dialect.Dialect) bool {
+	capability, ok := target.(interface{ Random() (string, bool) })
+	if !ok {
+		return false
+	}
+	_, ok = capability.Random()
+	return ok
+}
+
+func supportsJSONEach(target dialect.Dialect) bool {
+	capability, ok := target.(interface {
+		JSONEach(string, string) (string, bool)
+	})
+	if !ok {
+		return false
+	}
+	_, ok = capability.JSONEach("", "")
+	return ok
+}
+
+func supportsRegex(target dialect.Dialect) bool {
+	_, ok := target.Regex("", "", true)
+	return ok
+}
+
 func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 	left, right := s.expression(value.Left), s.expression(value.Right)
 	op := strings.ToLower(value.Operator)
@@ -459,8 +612,20 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 			op = "IN"
 		}
 	case "in~", "!in~":
-		s.error("KQLL0403", value.Span, "operator.scalar."+op, "case-insensitive membership requires value-by-value expansion")
-		return nil
+		list, ok := right.(*sqlast.List)
+		if !ok || len(list.Items) == 0 {
+			s.error("KQLL0403", value.Span, "operator.scalar."+op, op+" requires a non-empty scalar value list")
+			return nil
+		}
+		items := make([]sqlast.Expr, len(list.Items))
+		for i, item := range list.Items {
+			items[i] = &sqlast.Call{Name: "lower", Args: []sqlast.Expr{item}}
+		}
+		operator := "IN"
+		if op == "!in~" {
+			operator = "NOT IN"
+		}
+		return &sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left}}, Operator: operator, Right: &sqlast.List{Items: items}}
 	case "between", "!between":
 		list, ok := right.(*sqlast.List)
 		if !ok || len(list.Items) != 2 {
@@ -481,8 +646,53 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 		return stringMatch(left, right, "prefix", strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
 	case "matches regex":
 		return &sqlast.Regex{Value: left, Pattern: right, CaseSensitive: true}
-	case "has", "!has", "has_cs", "!has_cs", "hasprefix", "!hasprefix", "hasprefix_cs", "!hasprefix_cs", "hassuffix", "!hassuffix", "hassuffix_cs", "!hassuffix_cs", "has_any", "has_all", ":":
-		s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" uses KQL term-index semantics and cannot be represented by SQL LIKE")
+	case "has", "!has", "has_cs", "!has_cs", "hasprefix", "!hasprefix", "hasprefix_cs", "!hasprefix_cs", "hassuffix", "!hassuffix", "hassuffix_cs", "!hassuffix_cs":
+		if !supportsRegex(s.compiler.dialect) {
+			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a regex-capable SQL dialect")
+			return nil
+		}
+		mode := "term"
+		if strings.Contains(op, "prefix") {
+			mode = "prefix"
+		} else if strings.Contains(op, "suffix") {
+			mode = "suffix"
+		}
+		result, ok := termMatch(left, right, mode, strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
+		if !ok {
+			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" currently requires one non-empty alphanumeric literal term")
+			return nil
+		}
+		return result
+	case "has_any", "has_all":
+		if !supportsRegex(s.compiler.dialect) {
+			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a regex-capable SQL dialect")
+			return nil
+		}
+		list, ok := right.(*sqlast.List)
+		if !ok || len(list.Items) == 0 {
+			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a non-empty literal term list")
+			return nil
+		}
+		operator := "OR"
+		if op == "has_all" {
+			operator = "AND"
+		}
+		var result sqlast.Expr
+		for _, item := range list.Items {
+			match, matched := termMatch(left, item, "term", false, false)
+			if !matched {
+				s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" currently requires non-empty alphanumeric literal terms")
+				return nil
+			}
+			if result == nil {
+				result = match
+			} else {
+				result = &sqlast.Binary{Left: result, Operator: operator, Right: match}
+			}
+		}
+		return result
+	case ":":
+		s.error("KQLL0404", value.Span, "operator.scalar.colon", ": search semantics require input schema information")
 		return nil
 	}
 	return &sqlast.Binary{Left: left, Operator: op, Right: right}
@@ -507,6 +717,36 @@ func stringMatch(left, right sqlast.Expr, wildcard string, caseSensitive, negati
 		op = "NOT LIKE"
 	}
 	return &sqlast.Binary{Left: left, Operator: op, Right: pattern}
+}
+
+func termMatch(left, right sqlast.Expr, mode string, caseSensitive, negative bool) (sqlast.Expr, bool) {
+	literal, ok := right.(*sqlast.Literal)
+	if !ok || literal.Kind != sqlast.StringLiteral || literal.Value == "" {
+		return nil, false
+	}
+	for _, r := range literal.Value {
+		if !unicode.IsLetter(r) && !unicode.IsNumber(r) {
+			return nil, false
+		}
+	}
+	term := literal.Value
+	leftBoundary, rightBoundary := `(^|[^[:alnum:]])`, `([^[:alnum:]]|$)`
+	pattern := leftBoundary + term + rightBoundary
+	switch mode {
+	case "prefix":
+		pattern = leftBoundary + term + `[[:alnum:]]*`
+	case "suffix":
+		pattern = leftBoundary + `[[:alnum:]]*` + term + rightBoundary
+	}
+	result := sqlast.Expr(&sqlast.Regex{
+		Value:         left,
+		Pattern:       &sqlast.Literal{Kind: sqlast.StringLiteral, Value: pattern},
+		CaseSensitive: caseSensitive,
+	})
+	if negative {
+		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
+	}
+	return result, true
 }
 
 func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
