@@ -1,0 +1,64 @@
+package kql
+
+import "testing"
+
+func TestParseRelationalPipeline(t *testing.T) {
+	script, errs := Parse(`T
+| where s has_cs "Error" and a between (1 .. 10)
+| extend square = a * a
+| summarize total = sum(square) by bin(ts, 1h)
+| order by total desc nulls last
+| take 5`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	query := script.Statements[0].(*ExpressionStatement).Pipeline
+	if query.Source.Kind != "table" || query.Source.Name != "T" {
+		t.Fatalf("source = %#v", query.Source)
+	}
+	want := []string{"where", "extend", "summarize", "sort", "take"}
+	for i, kind := range want {
+		if query.Operators[i].Kind != kind {
+			t.Errorf("operator %d = %q, want %q", i, query.Operators[i].Kind, kind)
+		}
+	}
+}
+
+func TestParseStatementsAndAliases(t *testing.T) {
+	script, errs := Parse(`let cutoff = 10; T | filter a > cutoff | limit 2;`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	if len(script.Statements) != 2 {
+		t.Fatalf("statement count = %d", len(script.Statements))
+	}
+	let := script.Statements[0].(*LetStatement)
+	if let.Name != "cutoff" || let.Value == nil {
+		t.Fatalf("let = %#v", let)
+	}
+	query := script.Statements[1].(*ExpressionStatement).Pipeline
+	if query.Operators[0].Kind != "where" || query.Operators[1].Kind != "take" {
+		t.Fatalf("operators = %#v", query.Operators)
+	}
+}
+
+func TestParseRecognizesAdvancedOperator(t *testing.T) {
+	script, errs := Parse(`T | make-series n=count() on ts step 1h`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	op := script.Statements[0].(*ExpressionStatement).Pipeline.Operators[0]
+	if op.Kind != "make-series" {
+		t.Fatalf("operator = %q", op.Kind)
+	}
+	if _, ok := op.Body.(RawSpec); !ok {
+		t.Fatalf("body = %T, want RawSpec", op.Body)
+	}
+}
+
+func TestParseReportsUnknownOperator(t *testing.T) {
+	_, errs := Parse(`T | frobnicate a`)
+	if len(errs) != 1 || errs[0].Code != "KQLP0301" {
+		t.Fatalf("Parse() errors = %#v", errs)
+	}
+}
