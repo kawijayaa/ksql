@@ -3,7 +3,7 @@ package ksql
 import (
 	"fmt"
 
-	"github.com/oka/ksql/kql"
+	"github.com/kawijayaa/ksql/kql"
 )
 
 // Severity is a diagnostic's effect on compilation.

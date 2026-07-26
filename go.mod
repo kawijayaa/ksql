@@ -1,3 +1,3 @@
-module github.com/oka/ksql
+module github.com/kawijayaa/ksql
 
 go 1.22

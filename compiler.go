@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oka/ksql/dialect"
-	featureledger "github.com/oka/ksql/features"
-	"github.com/oka/ksql/kql"
-	"github.com/oka/ksql/sqlast"
+	"github.com/kawijayaa/ksql/dialect"
+	featureledger "github.com/kawijayaa/ksql/features"
+	"github.com/kawijayaa/ksql/kql"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 // Compiler translates KQL into one configured SQL dialect. A Compiler is safe

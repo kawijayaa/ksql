@@ -3,7 +3,7 @@ package dialect
 import (
 	"testing"
 
-	"github.com/oka/ksql/sqlast"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 func TestRenderNestedSelect(t *testing.T) {

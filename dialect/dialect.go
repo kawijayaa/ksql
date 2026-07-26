@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/oka/ksql/sqlast"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 // Dialect captures SQL syntax choices relevant to KQL lowering.

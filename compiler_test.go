@@ -3,9 +3,9 @@ package ksql_test
 import (
 	"testing"
 
-	"github.com/oka/ksql"
-	"github.com/oka/ksql/dialect"
-	"github.com/oka/ksql/features"
+	"github.com/kawijayaa/ksql"
+	"github.com/kawijayaa/ksql/dialect"
+	"github.com/kawijayaa/ksql/features"
 )
 
 func TestCompilePipeline(t *testing.T) {
