@@ -148,6 +148,10 @@ type Regex struct {
 	CaseSensitive bool
 }
 type Exists struct{ Query Query }
+type Filtered struct {
+	Expr  Expr
+	Where Expr
+}
 
 func (*Identifier) exprNode()    {}
 func (*Literal) exprNode()       {}
@@ -164,6 +168,7 @@ func (*Cast) exprNode()          {}
 func (*Index) exprNode()         {}
 func (*Regex) exprNode()         {}
 func (*Exists) exprNode()        {}
+func (*Filtered) exprNode()      {}
 
 type LiteralKind uint8
 

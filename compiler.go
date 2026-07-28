@@ -111,10 +111,11 @@ func (c *Compiler) Compile(source string) Result {
 	}
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features
-	result.Args = append([]any(nil), state.args...)
 	if !result.OK() || relation.Query == nil {
 		return result
 	}
+	state.args = sqlast.NormalizeParameters(relation.Query, state.args)
+	result.Args = append([]any(nil), state.args...)
 
 	sql, err := dialect.Render(c.dialect, relation.Query)
 	if err != nil {
@@ -126,7 +127,9 @@ func (c *Compiler) Compile(source string) Result {
 	}
 	result.SQL = sql
 	result.Query = relation.Query
-	result.Columns = append([]Column(nil), relation.Schema.Columns...)
+	if !relation.Schema.Unknown {
+		result.Columns = append([]Column(nil), relation.Schema.Columns...)
+	}
 	return result
 }
 
@@ -354,6 +357,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return Relation{}
 		}
 		spec := operator.Body.(kql.ExpressionSpec)
+		if !s.validateLimit(spec.Expressions[0], operator) {
+			return Relation{}
+		}
 		return Relation{Query: &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Expressions[0]).SQL}, Schema: input.Schema.Clone()}
 	case "sample-distinct":
 		if !supportsRandom(s.compiler.dialect) {
@@ -361,6 +367,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return Relation{}
 		}
 		spec := operator.Body.(kql.SampleDistinctSpec)
+		if !s.validateLimit(spec.Count, operator) {
+			return Relation{}
+		}
 		column := s.expression(spec.Column)
 		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: column.SQL}}}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count).SQL}, Schema: Schema{Columns: []Column{{Name: column.Name, Type: column.Type}}}}
@@ -537,6 +546,9 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 			s.bindError("KQLB0320", pipeline.Span, "operator.union", "union inputs must have the same ordered schema")
 			return Relation{}
 		}
+		if schema.Unknown || relation.Schema.Unknown {
+			schema = Schema{Unknown: true}
+		}
 	}
 	if spec.Kind == "outer" {
 		s.warn("KQLL0320", operator.Span, "operator.union.outer", "SQL UNION aligns columns by position; KQL outer union aligns and qualifies them by name and type")
@@ -550,11 +562,11 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 }
 
 func (s *compileState) mvExpand(input Relation, spec kql.MvExpandSpec, operator kql.Operator) Relation {
-	return s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
+	return s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, spec.Kind, operator)
 }
 
 func (s *compileState) mvApply(input Relation, spec kql.MvApplySpec, operator kql.Operator) Relation {
-	relation := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
+	relation := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, "bag", operator)
 	if relation.Query == nil {
 		return Relation{}
 	}
@@ -573,7 +585,7 @@ func (s *compileState) mvApply(input Relation, spec kql.MvApplySpec, operator kq
 	return relation
 }
 
-func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemIndex string, limit kql.Expression, operator kql.Operator) Relation {
+func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemIndex string, limit kql.Expression, expansionKind string, operator kql.Operator) Relation {
 	if !supportsJSONEach(s.compiler.dialect) {
 		s.error("KQLL0330", operator.Span, "operator."+operator.Kind, "dialect "+s.compiler.dialect.Name()+" has no JSON array expansion")
 		return Relation{}
@@ -619,6 +631,19 @@ func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemI
 		Kind:  "CROSS",
 	}
 	element := sqlast.Expr(&sqlast.Identifier{Parts: []string{expansionAlias, "value"}})
+	expansionType := sqlast.Expr(&sqlast.Identifier{Parts: []string{expansionAlias, "type"}})
+	isNestedJSON := &sqlast.Binary{
+		Left:     &sqlast.Binary{Left: expansionType, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "object"}},
+		Operator: "OR",
+		Right:    &sqlast.Binary{Left: expansionType, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "array"}},
+	}
+	jsonValue := sqlast.Expr(&sqlast.Case{Branches: []sqlast.When{{Condition: isNestedJSON, Result: &sqlast.Call{Name: "json", Args: []sqlast.Expr{element}}}}, Else: element})
+	isObject := &sqlast.Binary{Left: &sqlast.Call{Name: "json_type", Args: []sqlast.Expr{value.SQL}}, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "object"}}
+	objectElement := sqlast.Expr(&sqlast.Call{Name: "json_object", Args: []sqlast.Expr{&sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, jsonValue}})
+	if expansionKind == "array" {
+		objectElement = &sqlast.Call{Name: "json_array", Args: []sqlast.Expr{&sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, jsonValue}}
+	}
+	element = &sqlast.Case{Branches: []sqlast.When{{Condition: isObject, Result: objectElement}}, Else: element}
 	if item.Type != "" {
 		types := map[string]string{
 			"long": "BIGINT", "int": "INTEGER", "real": "DOUBLE PRECISION", "double": "DOUBLE PRECISION",
@@ -662,7 +687,10 @@ func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemI
 	}
 	if itemIndex != "" {
 		projections = append(projections, sqlast.SelectItem{
-			Expr:  &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
+			Expr: &sqlast.Case{Branches: []sqlast.When{{
+				Condition: &sqlast.Binary{Left: &sqlast.Call{Name: "json_type", Args: []sqlast.Expr{value.SQL}}, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "array"}},
+				Result:    &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
+			}}, Else: &sqlast.Literal{Kind: sqlast.NullLiteral}},
 			Alias: itemIndex,
 		})
 		output.Columns = append(output.Columns, Column{Name: itemIndex, Type: TypeLong})
@@ -718,6 +746,13 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 			operator = "IS NOT"
 		}
 		return boolean(&sqlast.Binary{Left: left.SQL, Operator: operator, Right: right.SQL})
+	}
+	if isNullExpression(left.SQL) && (op == "==" || op == "!=" || op == "<>") {
+		operator := "IS"
+		if op != "==" {
+			operator = "IS NOT"
+		}
+		return boolean(&sqlast.Binary{Left: right.SQL, Operator: operator, Right: left.SQL})
 	}
 	switch op {
 	case "==":
@@ -1059,7 +1094,8 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 			s.error("KQLL0503", value.Span, "aggregate.make_list", "make_list requires an explicit dialect mapping")
 			return boundExpr{}
 		}
-		return boundExpr{SQL: &sqlast.Call{Name: name, Args: args}, Type: TypeDynamic}
+		call := &sqlast.Call{Name: name, Args: args}
+		return boundExpr{SQL: &sqlast.Filtered{Expr: call, Where: &sqlast.Binary{Left: args[0], Operator: "IS NOT", Right: &sqlast.Literal{Kind: sqlast.NullLiteral}}}, Type: TypeDynamic}
 	case "dcount":
 		s.error("KQLL0510", value.Span, "aggregate.dcount", "dcount is approximate in KQL and requires an explicit compatible aggregate mapping")
 		return boundExpr{}
@@ -1093,10 +1129,12 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		return TypeBool
 	case "make_list", "make_set":
 		return TypeDynamic
+	case "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow":
+		return TypeReal
 	}
 	if len(arguments) > 0 {
 		switch function {
-		case "sum", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
+		case "sum", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "sign":
 			return arguments[0]
 		}
 	}

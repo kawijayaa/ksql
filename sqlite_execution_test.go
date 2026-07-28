@@ -144,6 +144,19 @@ func TestSQLiteExecMvExpandAndApply(t *testing.T) {
 	}
 }
 
+func TestSQLiteExecMvExpandObjectModes(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := sqliteCompiler()
+	bag := compiler.Compile(`Events | where Host == "alpha" | mv-expand Entry=RawData.process | project Entry`)
+	if rows := queryRows(t, db, bag); !reflect.DeepEqual(rows, [][]any{{`{"command_line":"PowerShell -enc x"}`}}) {
+		t.Fatalf("bag rows = %#v; SQL = %s", rows, bag.SQL)
+	}
+	array := compiler.Compile(`Events | where Host == "alpha" | mv-expand kind=array Entry=RawData.process | project Entry`)
+	if rows := queryRows(t, db, array); !reflect.DeepEqual(rows, [][]any{{`["command_line","PowerShell -enc x"]`}}) {
+		t.Fatalf("array rows = %#v; SQL = %s", rows, array.SQL)
+	}
+}
+
 func TestSQLiteExecJoinKinds(t *testing.T) {
 	db := openInvestigationDB(t)
 	compiler := sqliteCompiler()
@@ -190,5 +203,28 @@ func TestSQLiteExecParameterizedInjectionValue(t *testing.T) {
 	result := compiler.Compile(`Events | where Host == "alpha' OR 1=1 --" | count`)
 	if rows := queryRows(t, db, result); !reflect.DeepEqual(rows, [][]any{{int64(0)}}) {
 		t.Fatalf("rows = %#v; SQL = %s Args = %#v", rows, result.SQL, result.Args)
+	}
+}
+
+func TestSQLiteExecParameterRenderOrderAndReuse(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
+	outer := compiler.Compile(`Events | where Host == "alpha" | extend Marker="outer" | project Marker, Host`)
+	if want := []any{"outer", "alpha"}; !reflect.DeepEqual(outer.Args, want) {
+		t.Fatalf("outer Args = %#v, want %#v; SQL = %s", outer.Args, want, outer.SQL)
+	}
+	if rows := queryRows(t, db, outer); !reflect.DeepEqual(rows, [][]any{{"outer", "alpha"}}) {
+		t.Fatalf("outer rows = %#v", rows)
+	}
+	reused := compiler.Compile(`let match="alpha"; Events | where Host == match or Host == match | count`)
+	if want := []any{"alpha", "alpha"}; !reflect.DeepEqual(reused.Args, want) {
+		t.Fatalf("reused Args = %#v, want %#v", reused.Args, want)
+	}
+	if rows := queryRows(t, db, reused); !reflect.DeepEqual(rows, [][]any{{int64(1)}}) {
+		t.Fatalf("reused rows = %#v", rows)
+	}
+	unused := compiler.Compile(`let unused="ignored"; Events | take 1`)
+	if want := []any{int64(1)}; !reflect.DeepEqual(unused.Args, want) {
+		t.Fatalf("unused Args = %#v, want %#v", unused.Args, want)
 	}
 }

@@ -74,7 +74,7 @@ func (r renderer) query(query sqlast.Query) (string, error) {
 				return "", err
 			}
 			if unionOperandNeedsWrapper(operand) {
-				sql = "SELECT * FROM (" + sql + ")"
+				sql = "SELECT * FROM (" + sql + ") AS " + r.dialect.QuoteIdentifier("_ku")
 			}
 			parts = append(parts, sql)
 		}
@@ -453,6 +453,16 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return "", err
 		}
 		return "EXISTS (" + query + ")", nil
+	case *sqlast.Filtered:
+		expression, err := r.expr(e.Expr)
+		if err != nil {
+			return "", err
+		}
+		where, err := r.expr(e.Where)
+		if err != nil {
+			return "", err
+		}
+		return expression + " FILTER (WHERE " + where + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported SQL expression node %T", expression)
 	}

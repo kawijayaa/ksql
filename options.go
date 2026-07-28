@@ -102,9 +102,22 @@ func WithLimits(limits Limits) Option {
 func SQLFunction(name string) FunctionRule {
 	return func(arguments []sqlast.Expr) (sqlast.Expr, error) {
 		name = strings.TrimSpace(name)
-		if name == "" {
-			return nil, fmt.Errorf("SQL function name is empty")
+		if !validSQLName(name) {
+			return nil, fmt.Errorf("invalid SQL function name %q", name)
 		}
 		return &sqlast.Call{Name: name, Args: arguments}, nil
 	}
+}
+
+func validSQLName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
