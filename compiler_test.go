@@ -69,7 +69,7 @@ func TestCompileJoin(t *testing.T) {
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM (SELECT * FROM "U") AS "_k1" WHERE ("active" = TRUE)) AS "_k2" USING ("key")`
+	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM (SELECT * FROM "U") AS "_k1" WHERE ("active" = TRUE)) AS "_k2" ON ("_k0"."key" = "_k2"."key")`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}
@@ -132,8 +132,8 @@ func TestCustomFunctionRule(t *testing.T) {
 }
 
 func TestCustomOperatorRule(t *testing.T) {
-	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithOperator("evaluate", func(input sqlast.Query, operator kql.Operator) (sqlast.Query, error) {
-		return &sqlast.Select{From: &sqlast.Subquery{Query: input, Alias: "plugin_input"}}, nil
+	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithOperator("evaluate", func(_ ksql.LoweringContext, input ksql.Relation, operator kql.Operator) (ksql.Relation, error) {
+		return ksql.Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: "plugin_input"}}, Schema: input.Schema}, nil
 	}))
 	result := compiler.Compile(`T | evaluate identity()`)
 	if !result.OK() {
@@ -237,7 +237,7 @@ func TestCompileAsAlias(t *testing.T) {
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM "T") AS "_k1" USING ("id")`
+	want := `SELECT * FROM (SELECT * FROM "T") AS "_k0" INNER JOIN (SELECT * FROM "T") AS "_k1" ON ("_k0"."id" = "_k1"."id")`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}

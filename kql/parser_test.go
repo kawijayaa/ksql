@@ -142,3 +142,18 @@ func TestParseLegacyMvExpandLimit(t *testing.T) {
 		t.Fatalf("mvexpand = %#v", spec)
 	}
 }
+
+func TestParseTypedSearchWithSpan(t *testing.T) {
+	script, errs := Parse(`Events | search "powershell"`)
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	operator := script.Statements[0].(*ExpressionStatement).Pipeline.Operators[0]
+	spec, ok := operator.Body.(SearchSpec)
+	if !ok {
+		t.Fatalf("search body = %T", operator.Body)
+	}
+	if spec.Term.NodeSpan().Length == 0 || operator.Span.Length == 0 {
+		t.Fatalf("search spans = term %v operator %v", spec.Term.NodeSpan(), operator.Span)
+	}
+}

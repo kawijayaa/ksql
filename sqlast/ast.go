@@ -104,7 +104,10 @@ type Literal struct {
 	Kind  LiteralKind
 	Value string
 }
-type Parameter struct{ Index int }
+type Parameter struct {
+	Index int
+	Kind  LiteralKind
+}
 type Star struct{}
 type QualifiedStar struct{ Parts []string }
 type Random struct{}
@@ -144,6 +147,7 @@ type Regex struct {
 	Pattern       Expr
 	CaseSensitive bool
 }
+type Exists struct{ Query Query }
 
 func (*Identifier) exprNode()    {}
 func (*Literal) exprNode()       {}
@@ -159,6 +163,7 @@ func (*Case) exprNode()          {}
 func (*Cast) exprNode()          {}
 func (*Index) exprNode()         {}
 func (*Regex) exprNode()         {}
+func (*Exists) exprNode()        {}
 
 type LiteralKind uint8
 

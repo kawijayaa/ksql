@@ -73,7 +73,10 @@ func (r renderer) query(query sqlast.Query) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			parts = append(parts, "("+sql+")")
+			if unionOperandNeedsWrapper(operand) {
+				sql = "SELECT * FROM (" + sql + ")"
+			}
+			parts = append(parts, sql)
 		}
 		operator := " UNION "
 		if q.All {
@@ -82,6 +85,17 @@ func (r renderer) query(query sqlast.Query) (string, error) {
 		return strings.Join(parts, operator), nil
 	default:
 		return "", fmt.Errorf("unsupported SQL query node %T", query)
+	}
+}
+
+func unionOperandNeedsWrapper(query sqlast.Query) bool {
+	switch value := query.(type) {
+	case *sqlast.Union:
+		return true
+	case *sqlast.Select:
+		return value.Limit != nil || len(value.OrderBy) > 0
+	default:
+		return true
 	}
 }
 
@@ -346,6 +360,15 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if strings.EqualFold(e.Name, "concat") {
+			if capability, ok := r.dialect.(interface {
+				Concat([]string) (string, bool)
+			}); ok {
+				if result, supported := capability.Concat(args); supported {
+					return result, nil
+				}
+			}
+		}
 		return strings.ToUpper(e.Name) + "(" + strings.Join(args, ", ") + ")", nil
 	case *sqlast.List:
 		items, err := r.expressions(e.Items)
@@ -398,6 +421,18 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if capability, ok := r.dialect.(interface {
+			JSONIndexExpression(value, index string, numeric bool) string
+		}); ok {
+			numeric := false
+			switch indexNode := e.Index.(type) {
+			case *sqlast.Literal:
+				numeric = indexNode.Kind == sqlast.NumberLiteral
+			case *sqlast.Parameter:
+				numeric = indexNode.Kind == sqlast.NumberLiteral
+			}
+			return capability.JSONIndexExpression(value, index, numeric), nil
+		}
 		return r.dialect.JSONIndex(value, index), nil
 	case *sqlast.Regex:
 		value, err := r.expr(e.Value)
@@ -412,6 +447,12 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return result, nil
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression operator", r.dialect.Name())
+	case *sqlast.Exists:
+		query, err := r.query(e.Query)
+		if err != nil {
+			return "", err
+		}
+		return "EXISTS (" + query + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported SQL expression node %T", expression)
 	}

@@ -245,6 +245,14 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		expr, errs := parseExpressionTokens(body)
 		op.Body = ExpressionSpec{Expressions: []Expression{expr}}
 		return op, errs
+	case "search":
+		if len(body) == 0 {
+			op.Body = RawSpec{Tokens: body}
+			return op, nil
+		}
+		expr, errs := parseExpressionTokens(body)
+		op.Body = SearchSpec{Term: expr}
+		return op, errs
 	case "project", "project-away", "project-by-names", "project-keep", "project-rename", "project-reorder", "extend", "distinct", "serialize":
 		exprs, errs := parseExpressionList(body)
 		op.Body = ExpressionSpec{Expressions: exprs}

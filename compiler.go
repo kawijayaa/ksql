@@ -15,10 +15,13 @@ import (
 // Compiler translates KQL into one configured SQL dialect. A Compiler is safe
 // for concurrent use after construction.
 type Compiler struct {
-	dialect       dialect.Dialect
-	functionRules map[string]FunctionRule
-	operatorRules map[string]OperatorRule
-	sourceRules   map[string]SourceRule
+	dialect          dialect.Dialect
+	functionRules    map[string]FunctionRule
+	operatorRules    map[string]OperatorRule
+	sourceRules      map[string]SourceRule
+	catalog          Catalog
+	parameterization ParameterizationMode
+	limits           Limits
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
@@ -44,8 +47,10 @@ type Result struct {
 	SQL         string
 	Args        []any
 	Tree        *kql.Script
+	Query       sqlast.Query
 	Diagnostics []Diagnostic
 	Features    []FeatureUse
+	Columns     []Column
 }
 
 // OK reports whether compilation completed without an error.
@@ -60,6 +65,9 @@ func (r Result) OK() bool {
 
 // Compile parses and translates source. The method never emits partial SQL.
 func (c *Compiler) Compile(source string) Result {
+	if c.limits.MaxSourceBytes > 0 && len(source) > c.limits.MaxSourceBytes {
+		return Result{Diagnostics: []Diagnostic{{Code: "KQLB0001", Severity: SeverityError, Phase: PhaseBind, Message: fmt.Sprintf("query exceeds MaxSourceBytes (%d)", c.limits.MaxSourceBytes)}}}
+	}
 	tree, parseErrors := kql.Parse(source)
 	result := Result{Tree: tree}
 	for _, parseError := range parseErrors {
@@ -72,19 +80,19 @@ func (c *Compiler) Compile(source string) Result {
 		return result
 	}
 
-	state := compileState{compiler: c, scalarLets: make(map[string]sqlast.Expr), tabularLets: make(map[string]sqlast.Query)}
-	var query sqlast.Query
+	state := compileState{compiler: c, scalarLets: make(map[string]boundExpr), tabularLets: make(map[string]Relation)}
+	var relation Relation
 	for _, statement := range tree.Statements {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
 			if node.Pipeline != nil {
 				value := state.pipeline(node.Pipeline)
-				if value != nil {
+				if value.Query != nil {
 					state.tabularLets[strings.ToLower(node.Name)] = value
 				}
 			} else if node.Value != nil {
 				value := state.expression(node.Value)
-				if value != nil {
+				if value.SQL != nil {
 					state.scalarLets[strings.ToLower(node.Name)] = value
 				}
 			} else {
@@ -94,20 +102,21 @@ func (c *Compiler) Compile(source string) Result {
 		case *kql.ControlStatement:
 			state.error("KQLL0102", node.Span, "statement."+node.Kind, node.Kind+" is a KQL session/control statement with no SQL query equivalent")
 		case *kql.ExpressionStatement:
-			if query != nil {
+			if relation.Query != nil {
 				state.error("KQLL0103", node.Span, "statement.expression", "multiple result-producing statements cannot be represented by one SQL query")
 				continue
 			}
-			query = state.pipeline(node.Pipeline)
+			relation = state.pipeline(node.Pipeline)
 		}
 	}
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features
-	if !result.OK() || query == nil {
+	result.Args = append([]any(nil), state.args...)
+	if !result.OK() || relation.Query == nil {
 		return result
 	}
 
-	sql, err := dialect.Render(c.dialect, query)
+	sql, err := dialect.Render(c.dialect, relation.Query)
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Code: "SQLD0001", Severity: SeverityError, Phase: PhaseSQL,
@@ -116,56 +125,86 @@ func (c *Compiler) Compile(source string) Result {
 		return result
 	}
 	result.SQL = sql
+	result.Query = relation.Query
+	result.Columns = append([]Column(nil), relation.Schema.Columns...)
 	return result
 }
 
 type compileState struct {
 	compiler    *Compiler
-	scalarLets  map[string]sqlast.Expr
-	tabularLets map[string]sqlast.Query
+	scalarLets  map[string]boundExpr
+	tabularLets map[string]Relation
 	diagnostics []Diagnostic
 	features    []FeatureUse
+	args        []any
 	alias       int
-	qualifiers  map[string]string
+	qualifiers  map[string]relationScope
 	qualifier   string
+	input       Schema
 }
 
-func (s *compileState) pipeline(pipeline *kql.Pipeline) sqlast.Query {
+type boundExpr struct {
+	SQL  sqlast.Expr
+	Type ScalarType
+	Name string
+}
+
+type relationScope struct {
+	alias  string
+	schema Schema
+}
+
+func (s *compileState) pipeline(pipeline *kql.Pipeline) Relation {
 	if pipeline == nil {
-		return nil
+		return Relation{}
 	}
-	query := s.source(pipeline.Source)
+	relation := s.source(pipeline.Source)
 	for _, operator := range pipeline.Operators {
-		if query == nil {
-			return nil
+		if relation.Query == nil {
+			return Relation{}
 		}
-		query = s.operator(query, operator)
+		relation = s.operator(relation, operator)
 	}
-	return query
+	return relation
 }
 
-func (s *compileState) source(source kql.Source) sqlast.Query {
+func (s *compileState) source(source kql.Source) Relation {
 	s.use("source."+source.Kind, "equivalent", source.Span)
-	if rule, ok := s.compiler.sourceRules[strings.ToLower(source.Kind)]; ok {
-		query, err := rule(source)
-		if err != nil {
-			s.error("KQLL0203", source.Span, "source."+source.Kind, err.Error())
-			return nil
-		}
-		if query == nil {
-			s.error("KQLL0204", source.Span, "source."+source.Kind, "custom source rule returned a nil query")
-		}
-		return query
-	}
-	switch source.Kind {
-	case "table":
+	if source.Kind == "table" {
 		if bound, ok := s.tabularLets[strings.ToLower(source.Name)]; ok {
 			return bound
 		}
-		return &sqlast.Select{From: &sqlast.Table{Parts: splitName(source.Name)}}
+	}
+	if rule, ok := s.compiler.sourceRules[strings.ToLower(source.Kind)]; ok {
+		relation, err := rule(&loweringContext{state: s, span: source.Span}, source)
+		if err != nil {
+			s.error("KQLL0203", source.Span, "source."+source.Kind, err.Error())
+			return Relation{}
+		}
+		if relation.Query == nil {
+			s.error("KQLL0204", source.Span, "source."+source.Kind, "custom source rule returned a nil query")
+		}
+		return relation
+	}
+	switch source.Kind {
+	case "table":
+		name := source.Name
+		schema := Schema{Unknown: true}
+		if s.compiler.catalog != nil {
+			table, ok := s.compiler.catalog.ResolveTable(source.Name)
+			if !ok {
+				s.bindError("KQLB0201", source.Span, "source.table", "unknown table "+source.Name)
+				return Relation{}
+			}
+			name, schema = table.Name, table.Schema.Clone()
+			if name == "" {
+				name = source.Name
+			}
+		}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Table{Parts: splitName(name)}}, Schema: schema}
 	case "print":
-		selectItems := s.selectItems(source.Items, true)
-		return &sqlast.Select{Projections: selectItems}
+		items, schema := s.projectItems(source.Items, true, Schema{})
+		return Relation{Query: &sqlast.Select{Projections: items}, Schema: schema}
 	case "datatable":
 		columns := make([]string, len(source.Columns))
 		for i, column := range source.Columns {
@@ -175,20 +214,24 @@ func (s *compileState) source(source kql.Source) sqlast.Query {
 		for i, row := range source.Rows {
 			rows[i] = s.expressions(row)
 		}
-		return &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}
+		schema := Schema{Columns: make([]Column, len(source.Columns))}
+		for i, column := range source.Columns {
+			schema.Columns[i] = Column{Name: column.Name, Type: parseScalarType(column.Type)}
+		}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}, Schema: schema}
 	case "range":
-		return &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: s.expression(source.From), To: s.expression(source.To), Step: s.expression(source.Step), Alias: s.nextAlias()}}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: s.expression(source.From).SQL, To: s.expression(source.To).SQL, Step: s.expression(source.Step).SQL, Alias: s.nextAlias()}}, Schema: Schema{Columns: []Column{{Name: source.Name, Type: TypeLong}}}}
 	case "expression":
 		if call, ok := source.Expr.(*kql.CallExpression); ok {
 			if table := s.entityCall(call); table != nil {
-				return &sqlast.Select{From: table}
+				return Relation{Query: &sqlast.Select{From: table}, Schema: Schema{Unknown: true}}
 			}
 		}
 		s.error("KQLL0201", source.Span, "source.expression", "expression is not a supported tabular source")
 	default:
 		s.error("KQLL0202", source.Span, "source."+source.Kind, source.Kind+" has no generic SQL source equivalent")
 	}
-	return nil
+	return Relation{}
 }
 
 func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
@@ -207,19 +250,19 @@ func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
 	return &sqlast.Table{Parts: []string{unquoteKQL(literal.Text)}}
 }
 
-func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlast.Query {
+func (s *compileState) operator(input Relation, operator kql.Operator) Relation {
 	feature := "operator." + operator.Kind
 	s.use(feature, "equivalent", operator.Span)
 	if rule, ok := s.compiler.operatorRules[strings.ToLower(operator.Kind)]; ok {
-		query, err := rule(input, operator)
+		relation, err := rule(&loweringContext{state: s, input: input.Schema, span: operator.Span}, input, operator)
 		if err != nil {
 			s.error("KQLL0303", operator.Span, feature, err.Error())
-			return nil
+			return Relation{}
 		}
-		if query == nil {
+		if relation.Query == nil {
 			s.error("KQLL0304", operator.Span, feature, "custom operator rule returned a nil query")
 		}
-		return query
+		return relation
 	}
 	if operator.Kind == "join" || operator.Kind == "lookup" {
 		return s.join(input, operator)
@@ -237,167 +280,211 @@ func (s *compileState) operator(input sqlast.Query, operator kql.Operator) sqlas
 		spec := operator.Body.(kql.AsSpec)
 		if spec.Materialized != nil && *spec.Materialized {
 			s.error("KQLL0306", operator.Span, feature, "as hint.materialized=true requires guaranteed single evaluation")
-			return nil
+			return Relation{}
 		}
 		s.tabularLets[strings.ToLower(spec.Name)] = input
 		return input
 	}
-	from := &sqlast.Subquery{Query: input, Alias: s.nextAlias()}
+	from := &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}
+	previousInput := s.input
+	s.input = input.Schema
+	defer func() { s.input = previousInput }()
 	switch operator.Kind {
 	case "where":
 		spec := operator.Body.(kql.ExpressionSpec)
-		return &sqlast.Select{From: from, Where: s.expression(spec.Expressions[0])}
+		condition := s.expression(spec.Expressions[0])
+		if condition.Type != TypeBool && condition.Type != TypeUnknown {
+			s.bindError("KQLB0301", spec.Expressions[0].NodeSpan(), feature, "where expression must be bool")
+		}
+		return Relation{Query: &sqlast.Select{From: from, Where: condition.SQL}, Schema: input.Schema.Clone()}
 	case "project":
 		spec := operator.Body.(kql.ExpressionSpec)
-		return &sqlast.Select{From: from, Projections: s.selectItems(spec.Expressions, false)}
+		if !s.checkProjectionLimit(spec.Expressions, operator) {
+			return Relation{}
+		}
+		items, schema := s.projectItems(spec.Expressions, false, input.Schema)
+		return Relation{Query: &sqlast.Select{From: from, Projections: items}, Schema: schema}
 	case "extend":
 		spec := operator.Body.(kql.ExpressionSpec)
-		items := []sqlast.SelectItem{{Expr: &sqlast.Star{}}}
-		items = append(items, s.selectItems(spec.Expressions, true)...)
-		return &sqlast.Select{From: from, Projections: items}
+		return s.extend(from, input.Schema, spec.Expressions, operator)
+	case "project-away", "project-keep", "project-rename", "project-reorder":
+		return s.projectionOperator(from, input.Schema, operator)
 	case "summarize":
 		spec := operator.Body.(kql.SummarizeSpec)
 		groups := s.expressions(spec.By)
-		items := s.selectItems(spec.By, true)
-		items = append(items, s.selectItems(spec.Aggregates, true)...)
-		return &sqlast.Select{From: from, Projections: items, GroupBy: groups}
+		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema)
+		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema)
+		groupSchema.Columns = append(groupSchema.Columns, aggregateSchema.Columns...)
+		s.validateUnique(groupSchema.Columns, operator.Span, feature)
+		return Relation{Query: &sqlast.Select{From: from, Projections: append(groupItems, aggregateItems...), GroupBy: groups}, Schema: groupSchema}
 	case "distinct":
 		spec := operator.Body.(kql.ExpressionSpec)
-		return &sqlast.Select{Distinct: true, From: from, Projections: s.selectItems(spec.Expressions, false)}
+		items, schema := s.projectItems(spec.Expressions, false, input.Schema)
+		return Relation{Query: &sqlast.Select{Distinct: true, From: from, Projections: items}, Schema: schema}
 	case "count":
 		alias := "Count"
 		if raw, ok := operator.Body.(kql.RawSpec); ok && len(raw.Tokens) == 2 && strings.EqualFold(raw.Tokens[0].Text, "as") {
 			alias = raw.Tokens[1].Text
 		}
-		return &sqlast.Select{From: from, Projections: []sqlast.SelectItem{{Expr: &sqlast.Call{Name: "count", Args: []sqlast.Expr{&sqlast.Star{}}}, Alias: alias}}}
+		return Relation{Query: &sqlast.Select{From: from, Projections: []sqlast.SelectItem{{Expr: &sqlast.Call{Name: "count", Args: []sqlast.Expr{&sqlast.Star{}}}, Alias: alias}}}, Schema: Schema{Columns: []Column{{Name: alias, Type: TypeLong}}}}
 	case "sort":
 		spec := operator.Body.(kql.SortSpec)
 		orders := make([]sqlast.Order, len(spec.Expressions))
 		for i, order := range spec.Expressions {
-			orders[i] = sqlast.Order{Expr: s.expression(order.Expression), Direction: order.Direction, Nulls: order.Nulls}
+			orders[i] = sqlast.Order{Expr: s.expression(order.Expression).SQL, Direction: order.Direction, Nulls: order.Nulls}
 		}
-		return &sqlast.Select{From: from, OrderBy: orders}
+		return Relation{Query: &sqlast.Select{From: from, OrderBy: orders}, Schema: input.Schema.Clone()}
 	case "take":
 		spec := operator.Body.(kql.ExpressionSpec)
-		return &sqlast.Select{From: from, Limit: s.expression(spec.Expressions[0])}
+		if !s.validateLimit(spec.Expressions[0], operator) {
+			return Relation{}
+		}
+		return Relation{Query: &sqlast.Select{From: from, Limit: s.expression(spec.Expressions[0]).SQL}, Schema: input.Schema.Clone()}
 	case "top":
 		spec := operator.Body.(kql.TopSpec)
-		return &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: s.expression(spec.By.Expression), Direction: spec.By.Direction, Nulls: spec.By.Nulls}}, Limit: s.expression(spec.Count)}
+		if !s.validateLimit(spec.Count, operator) {
+			return Relation{}
+		}
+		return Relation{Query: &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: s.expression(spec.By.Expression).SQL, Direction: spec.By.Direction, Nulls: spec.By.Nulls}}, Limit: s.expression(spec.Count).SQL}, Schema: input.Schema.Clone()}
+	case "search":
+		return s.search(from, input.Schema, operator)
 	case "sample":
 		if !supportsRandom(s.compiler.dialect) {
 			s.error("KQLL0305", operator.Span, feature, "dialect "+s.compiler.dialect.Name()+" has no random sampling expression")
-			return nil
+			return Relation{}
 		}
 		spec := operator.Body.(kql.ExpressionSpec)
-		return &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Expressions[0])}
+		return Relation{Query: &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Expressions[0]).SQL}, Schema: input.Schema.Clone()}
 	case "sample-distinct":
 		if !supportsRandom(s.compiler.dialect) {
 			s.error("KQLL0305", operator.Span, feature, "dialect "+s.compiler.dialect.Name()+" has no random sampling expression")
-			return nil
+			return Relation{}
 		}
 		spec := operator.Body.(kql.SampleDistinctSpec)
-		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: s.expression(spec.Column)}}}
-		return &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count)}
+		column := s.expression(spec.Column)
+		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: column.SQL}}}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count).SQL}, Schema: Schema{Columns: []Column{{Name: column.Name, Type: column.Type}}}}
 	case "serialize":
 		s.warn("KQLL0301", operator.Span, feature, "serialize metadata is unnecessary in SQL; row order still requires an explicit sort")
-		return &sqlast.Select{From: from}
+		return Relation{Query: &sqlast.Select{From: from}, Schema: input.Schema.Clone()}
 	default:
 		s.error("KQLL0302", operator.Span, feature, operator.Kind+" is recognized but has no enabled lowering for "+s.compiler.dialect.Name())
-		return nil
+		return Relation{}
 	}
 }
 
-func (s *compileState) selectItems(expressions []kql.Expression, inferAlias bool) []sqlast.SelectItem {
+func (s *compileState) projectItems(expressions []kql.Expression, inferAlias bool, input Schema) ([]sqlast.SelectItem, Schema) {
 	items := make([]sqlast.SelectItem, 0, len(expressions))
+	schema := Schema{}
 	for _, expression := range expressions {
 		item := sqlast.SelectItem{}
+		bound := boundExpr{}
 		if named, ok := expression.(*kql.NamedExpression); ok {
-			item.Expr = s.expression(named.Value)
+			bound = s.expression(named.Value)
+			item.Expr = bound.SQL
 			item.Alias = named.Name
 		} else {
-			item.Expr = s.expression(expression)
+			bound = s.expression(expression)
+			item.Expr = bound.SQL
 			if inferAlias {
-				switch value := expression.(type) {
-				case *kql.NameExpression:
-					item.Alias = lastName(value.Name)
-				case *kql.CallExpression:
-					if function, ok := value.Function.(*kql.NameExpression); ok {
-						item.Alias = lastName(function.Name)
-					}
-				}
+				item.Alias = inferredName(expression, bound.Name)
 			}
 		}
 		if item.Expr != nil {
 			items = append(items, item)
+			name := item.Alias
+			if name == "" {
+				name = bound.Name
+			}
+			if name == "" {
+				s.bindError("KQLB0404", expression.NodeSpan(), "operator.project", "expression requires an output name")
+				continue
+			}
+			schema.Columns = append(schema.Columns, Column{Name: name, Type: bound.Type})
 		}
 	}
-	return items
+	s.validateUnique(schema.Columns, spanOfExpressions(expressions), "operator.project")
+	return items, schema
 }
 
 func (s *compileState) expressions(expressions []kql.Expression) []sqlast.Expr {
 	result := make([]sqlast.Expr, 0, len(expressions))
 	for _, expression := range expressions {
-		if value := s.expression(expression); value != nil {
-			result = append(result, value)
+		if value := s.expression(expression); value.SQL != nil {
+			result = append(result, value.SQL)
 		}
 	}
 	return result
 }
 
-func (s *compileState) expression(expression kql.Expression) sqlast.Expr {
+func (s *compileState) expression(expression kql.Expression) boundExpr {
 	if expression == nil {
-		return nil
+		return boundExpr{}
 	}
 	switch value := expression.(type) {
 	case *kql.NameExpression:
 		if bound, ok := s.scalarLets[strings.ToLower(value.Name)]; ok {
 			return bound
 		}
-		parts := splitName(unquoteKQL(value.Name))
-		if len(parts) > 1 && s.qualifiers != nil {
-			if qualifier, ok := s.qualifiers[strings.ToLower(parts[0])]; ok {
-				parts[0] = qualifier
-			}
-		} else if len(parts) == 1 && s.qualifier != "" {
-			parts = append([]string{s.qualifier}, parts...)
-		}
-		return &sqlast.Identifier{Parts: parts}
+		return s.name(value)
 	case *kql.LiteralExpression:
-		return lowerLiteral(value)
+		return s.literal(value)
 	case *kql.StarExpression:
-		return &sqlast.Star{}
+		return boundExpr{SQL: &sqlast.Star{}, Type: TypeUnknown, Name: "*"}
 	case *kql.UnaryExpression:
-		return &sqlast.Unary{Operator: value.Operator, Operand: s.expression(value.Operand)}
+		operand := s.expression(value.Operand)
+		return boundExpr{SQL: &sqlast.Unary{Operator: value.Operator, Operand: operand.SQL}, Type: operand.Type}
 	case *kql.BinaryExpression:
 		return s.binary(value)
 	case *kql.CallExpression:
 		return s.call(value)
 	case *kql.IndexExpression:
-		return &sqlast.Index{Value: s.expression(value.Value), Index: s.expression(value.Index)}
+		base, index := s.expression(value.Value), s.expression(value.Index)
+		if base.Type != TypeDynamic && base.Type != TypeUnknown {
+			s.bindError("KQLB0405", value.Span, "expression.index", "property access requires a dynamic value")
+		}
+		return boundExpr{SQL: &sqlast.Index{Value: base.SQL, Index: index.SQL}, Type: TypeDynamic}
 	case *kql.NamedExpression:
 		return s.expression(value.Value)
 	case *kql.ListExpression:
-		return &sqlast.List{Items: s.expressions(value.Items)}
+		return boundExpr{SQL: &sqlast.List{Items: s.expressions(value.Items)}, Type: TypeDynamic}
 	case *kql.RawExpression:
 		s.error("KQLL0401", value.Span, "expression.raw", "expression syntax is preserved but cannot be lowered")
-		return nil
+		return boundExpr{}
 	default:
 		s.error("KQLL0402", expression.NodeSpan(), "expression.unknown", fmt.Sprintf("unsupported expression node %T", expression))
-		return nil
+		return boundExpr{}
 	}
 }
 
-func (s *compileState) join(input sqlast.Query, operator kql.Operator) sqlast.Query {
+func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 	spec := operator.Body.(kql.JoinSpec)
 	leftAlias := s.nextAlias()
-	rightQuery := s.pipeline(spec.Right)
-	if rightQuery == nil {
-		return nil
+	right := s.pipeline(spec.Right)
+	if right.Query == nil {
+		return Relation{}
 	}
 	rightAlias := s.nextAlias()
+	if s.compiler.limits.MaxJoinKeys > 0 && len(spec.Conditions) > s.compiler.limits.MaxJoinKeys {
+		s.bindError("KQLB0312", operator.Span, "operator.join", fmt.Sprintf("join exceeds MaxJoinKeys (%d)", s.compiler.limits.MaxJoinKeys))
+		return Relation{}
+	}
+
+	condition := s.joinCondition(spec, input.Schema, right.Schema, leftAlias, rightAlias, operator)
+	if condition == nil && (len(spec.Conditions) > 0 || spec.Condition != nil) {
+		return Relation{}
+	}
+	if spec.Kind == "leftanti" || spec.Kind == "leftsemi" {
+		exists := sqlast.Expr(&sqlast.Exists{Query: &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, From: &sqlast.Subquery{Query: right.Query, Alias: rightAlias}, Where: condition}})
+		if spec.Kind == "leftanti" {
+			exists = &sqlast.Unary{Operator: "NOT ", Operand: exists}
+		}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: leftAlias}, Where: exists}, Schema: input.Schema.Clone()}
+	}
 	join := &sqlast.Join{
-		Left:  &sqlast.Subquery{Query: input, Alias: leftAlias},
-		Right: &sqlast.Subquery{Query: rightQuery, Alias: rightAlias},
+		Left:  &sqlast.Subquery{Query: input.Query, Alias: leftAlias},
+		Right: &sqlast.Subquery{Query: right.Query, Alias: rightAlias},
+		On:    condition,
 	}
 	switch spec.Kind {
 	case "inner":
@@ -410,97 +497,81 @@ func (s *compileState) join(input sqlast.Query, operator kql.Operator) sqlast.Qu
 		join.Kind = "FULL"
 	case "innerunique":
 		s.error("KQLL0310", operator.Span, "operator.join.innerunique", "innerunique deduplicates the left input and requires schema-aware window lowering")
-		return nil
+		return Relation{}
 	default:
 		s.error("KQLL0311", operator.Span, "operator."+operator.Kind+"."+spec.Kind, "join kind "+spec.Kind+" requires semi/anti relational lowering")
-		return nil
+		return Relation{}
 	}
-	if len(spec.Conditions) > 0 {
-		allNames := true
-		for _, condition := range spec.Conditions {
-			name, ok := condition.(*kql.NameExpression)
-			if !ok || strings.Contains(name.Name, ".") {
-				allNames = false
-				break
-			}
-			join.Using = append(join.Using, unquoteKQL(name.Name))
-		}
-		if !allNames {
-			join.Using = nil
-			previous := s.qualifiers
-			s.qualifiers = map[string]string{"$left": leftAlias, "$right": rightAlias}
-			for _, condition := range spec.Conditions {
-				translated := s.expression(condition)
-				if join.On == nil {
-					join.On = translated
-				} else {
-					join.On = &sqlast.Binary{Left: join.On, Operator: "AND", Right: translated}
-				}
-			}
-			s.qualifiers = previous
-		}
-	} else if spec.Condition != nil {
-		previous := s.qualifiers
-		s.qualifiers = map[string]string{"$left": leftAlias, "$right": rightAlias}
-		join.On = s.expression(spec.Condition)
-		s.qualifiers = previous
+	output := joinSchema(input.Schema, right.Schema, operator.Kind == "lookup")
+	var projections []sqlast.SelectItem
+	if !output.Unknown {
+		projections = joinProjections(input.Schema, right.Schema, output, leftAlias, rightAlias, operator.Kind == "lookup")
 	}
-	return &sqlast.Select{From: join}
+	return Relation{Query: &sqlast.Select{From: join, Projections: projections}, Schema: output}
 }
 
-func (s *compileState) union(input sqlast.Query, operator kql.Operator) sqlast.Query {
+func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 	spec := operator.Body.(kql.UnionSpec)
-	queries := []sqlast.Query{input}
+	queries := []sqlast.Query{input.Query}
+	schema := input.Schema.Clone()
 	for _, pipeline := range spec.Inputs {
-		query := s.pipeline(pipeline)
-		if query == nil {
-			return nil
+		relation := s.pipeline(pipeline)
+		if relation.Query == nil {
+			return Relation{}
 		}
-		queries = append(queries, query)
+		queries = append(queries, relation.Query)
+		if !schemasEqual(schema, relation.Schema) {
+			s.bindError("KQLB0320", pipeline.Span, "operator.union", "union inputs must have the same ordered schema")
+			return Relation{}
+		}
 	}
 	if spec.Kind == "outer" {
 		s.warn("KQLL0320", operator.Span, "operator.union.outer", "SQL UNION aligns columns by position; KQL outer union aligns and qualifies them by name and type")
 	} else if spec.Kind != "inner" {
 		s.error("KQLL0321", operator.Span, "operator.union."+spec.Kind, "unknown union kind "+spec.Kind)
-		return nil
+		return Relation{}
 	} else {
 		s.warn("KQLL0322", operator.Span, "operator.union.inner", "SQL UNION requires inputs to already have the same projected schema")
 	}
-	return &sqlast.Union{All: true, Queries: queries}
+	return Relation{Query: &sqlast.Union{All: true, Queries: queries}, Schema: schema}
 }
 
-func (s *compileState) mvExpand(input sqlast.Query, spec kql.MvExpandSpec, operator kql.Operator) sqlast.Query {
+func (s *compileState) mvExpand(input Relation, spec kql.MvExpandSpec, operator kql.Operator) Relation {
 	return s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
 }
 
-func (s *compileState) mvApply(input sqlast.Query, spec kql.MvApplySpec, operator kql.Operator) sqlast.Query {
-	query := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
-	if query == nil {
-		return nil
+func (s *compileState) mvApply(input Relation, spec kql.MvApplySpec, operator kql.Operator) Relation {
+	relation := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, operator)
+	if relation.Query == nil {
+		return Relation{}
 	}
 	for _, inner := range spec.Operators {
 		switch inner.Kind {
 		case "where", "extend", "serialize":
-			query = s.operator(query, inner)
+			relation = s.operator(relation, inner)
 		default:
 			s.error("KQLL0334", inner.Span, "operator.mv-apply."+inner.Kind, "SQLite mv-apply currently supports where, extend, and serialize subqueries")
-			return nil
+			return Relation{}
 		}
-		if query == nil {
-			return nil
+		if relation.Query == nil {
+			return Relation{}
 		}
 	}
-	return query
+	return relation
 }
 
-func (s *compileState) expandJSON(input sqlast.Query, items []kql.MvExpansion, itemIndex string, limit kql.Expression, operator kql.Operator) sqlast.Query {
+func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemIndex string, limit kql.Expression, operator kql.Operator) Relation {
 	if !supportsJSONEach(s.compiler.dialect) {
 		s.error("KQLL0330", operator.Span, "operator."+operator.Kind, "dialect "+s.compiler.dialect.Name()+" has no JSON array expansion")
-		return nil
+		return Relation{}
 	}
 	if len(items) != 1 {
 		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" currently requires exactly one array expression")
-		return nil
+		return Relation{}
+	}
+	if s.compiler.limits.MaxExpansionItems > 0 && len(items) > s.compiler.limits.MaxExpansionItems {
+		s.bindError("KQLB0337", operator.Span, "operator."+operator.Kind, fmt.Sprintf("expansion exceeds MaxExpansionItems (%d)", s.compiler.limits.MaxExpansionItems))
+		return Relation{}
 	}
 	item := items[0]
 	sourceName := ""
@@ -509,21 +580,28 @@ func (s *compileState) expandJSON(input sqlast.Query, items []kql.MvExpansion, i
 	}
 	if item.Name == "" {
 		s.error("KQLL0332", item.Span, "operator."+operator.Kind, operator.Kind+" requires an explicit output name for non-column expressions")
-		return nil
+		return Relation{}
 	}
-	if strings.EqualFold(item.Name, sourceName) {
-		s.error("KQLL0333", item.Span, "operator."+operator.Kind, "SQLite cannot replace a column during JSON expansion without the input schema; use a distinct output alias")
-		return nil
+	if input.Schema.Unknown && strings.EqualFold(item.Name, sourceName) {
+		s.error("KQLL0333", item.Span, "operator."+operator.Kind, "column replacement requires a bound input schema")
+		return Relation{}
 	}
 
 	inputAlias, expansionAlias := s.nextAlias(), s.nextAlias()
 	previousQualifier := s.qualifier
 	s.qualifier = inputAlias
+	previousInput := s.input
+	s.input = input.Schema
 	value := s.expression(item.Expression)
+	s.input = previousInput
 	s.qualifier = previousQualifier
-	expansion := &sqlast.JSONEach{Value: value, Alias: expansionAlias}
+	if value.Type != TypeDynamic && value.Type != TypeUnknown {
+		s.bindError("KQLB0338", item.Span, "operator."+operator.Kind, "expanded expression must be dynamic")
+		return Relation{}
+	}
+	expansion := &sqlast.JSONEach{Value: value.SQL, Alias: expansionAlias}
 	from := &sqlast.Join{
-		Left:  &sqlast.Subquery{Query: input, Alias: inputAlias},
+		Left:  &sqlast.Subquery{Query: input.Query, Alias: inputAlias},
 		Right: expansion,
 		Kind:  "CROSS",
 	}
@@ -537,30 +615,54 @@ func (s *compileState) expandJSON(input sqlast.Query, items []kql.MvExpansion, i
 		target, ok := types[item.Type]
 		if !ok {
 			s.error("KQLL0335", item.Span, "operator."+operator.Kind, "unsupported expansion type "+item.Type)
-			return nil
+			return Relation{}
 		}
 		s.warn("KQLL0336", item.Span, "operator."+operator.Kind, "SQLite casts invalid expanded values instead of returning null")
 		element = &sqlast.Cast{Expr: element, Type: target}
 	}
-	projections := []sqlast.SelectItem{
-		{Expr: &sqlast.QualifiedStar{Parts: []string{inputAlias}}},
-		{Expr: element, Alias: item.Name},
+	output := input.Schema.Clone()
+	columnType := TypeDynamic
+	if item.Type != "" {
+		columnType = parseScalarType(item.Type)
+	}
+	_, replaceAt, replacing, _ := output.Lookup(item.Name)
+	if replacing {
+		output.Columns[replaceAt] = Column{Name: output.Columns[replaceAt].Name, Type: columnType}
+	} else {
+		output.Columns = append(output.Columns, Column{Name: item.Name, Type: columnType})
+	}
+	projections := make([]sqlast.SelectItem, 0, len(output.Columns)+1)
+	if output.Unknown {
+		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.QualifiedStar{Parts: []string{inputAlias}}})
+		projections = append(projections, sqlast.SelectItem{Expr: element, Alias: item.Name})
+	} else {
+		for _, column := range input.Schema.Columns {
+			expr := sqlast.Expr(&sqlast.Identifier{Parts: []string{inputAlias, column.Name}})
+			if strings.EqualFold(column.Name, item.Name) {
+				expr = element
+			}
+			projections = append(projections, sqlast.SelectItem{Expr: expr, Alias: column.Name})
+		}
+		if !replacing {
+			projections = append(projections, sqlast.SelectItem{Expr: element, Alias: item.Name})
+		}
 	}
 	if itemIndex != "" {
 		projections = append(projections, sqlast.SelectItem{
 			Expr:  &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
 			Alias: itemIndex,
 		})
+		output.Columns = append(output.Columns, Column{Name: itemIndex, Type: TypeLong})
 	}
 	query := &sqlast.Select{From: from, Projections: projections}
 	if limit != nil {
 		query.Where = &sqlast.Binary{
 			Left:     &sqlast.Cast{Expr: &sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, Type: "INTEGER"},
 			Operator: "<",
-			Right:    s.expression(limit),
+			Right:    s.expression(limit).SQL,
 		}
 	}
-	return query
+	return Relation{Query: query, Schema: output}
 }
 
 func supportsRandom(target dialect.Dialect) bool {
@@ -588,10 +690,22 @@ func supportsRegex(target dialect.Dialect) bool {
 	return ok
 }
 
-func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
-	left, right := s.expression(value.Left), s.expression(value.Right)
+func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 	op := strings.ToLower(value.Operator)
+	left := s.expression(value.Left)
+	right := boundExpr{}
+	if !isTermOperator(op) {
+		right = s.expression(value.Right)
+	}
 	s.use(scalarOperatorID(op), "equivalent", value.Span)
+	boolean := func(expression sqlast.Expr) boundExpr { return boundExpr{SQL: expression, Type: TypeBool} }
+	if isNullExpression(right.SQL) && (op == "==" || op == "!=" || op == "<>") {
+		operator := "IS"
+		if op != "==" {
+			operator = "IS NOT"
+		}
+		return boolean(&sqlast.Binary{Left: left.SQL, Operator: operator, Right: right.SQL})
+	}
 	switch op {
 	case "==":
 		op = "="
@@ -604,7 +718,7 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 		if op == "!~" {
 			comparison = "<>"
 		}
-		return &sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left}}, Operator: comparison, Right: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{right}}}
+		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left.SQL}}, Operator: comparison, Right: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{right.SQL}}})
 	case "in", "!in":
 		if op == "!in" {
 			op = "NOT IN"
@@ -612,10 +726,10 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 			op = "IN"
 		}
 	case "in~", "!in~":
-		list, ok := right.(*sqlast.List)
+		list, ok := right.SQL.(*sqlast.List)
 		if !ok || len(list.Items) == 0 {
 			s.error("KQLL0403", value.Span, "operator.scalar."+op, op+" requires a non-empty scalar value list")
-			return nil
+			return boundExpr{}
 		}
 		items := make([]sqlast.Expr, len(list.Items))
 		for i, item := range list.Items {
@@ -625,31 +739,31 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 		if op == "!in~" {
 			operator = "NOT IN"
 		}
-		return &sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left}}, Operator: operator, Right: &sqlast.List{Items: items}}
+		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left.SQL}}, Operator: operator, Right: &sqlast.List{Items: items}})
 	case "between", "!between":
-		list, ok := right.(*sqlast.List)
+		list, ok := right.SQL.(*sqlast.List)
 		if !ok || len(list.Items) != 2 {
-			return nil
+			return boundExpr{}
 		}
-		between := &sqlast.Binary{Left: left, Operator: "BETWEEN", Right: &sqlast.Binary{Left: list.Items[0], Operator: "AND", Right: list.Items[1]}}
+		between := &sqlast.Binary{Left: left.SQL, Operator: "BETWEEN", Right: &sqlast.Binary{Left: list.Items[0], Operator: "AND", Right: list.Items[1]}}
 		if op == "!between" {
-			return &sqlast.Unary{Operator: "NOT ", Operand: between}
+			return boolean(&sqlast.Unary{Operator: "NOT ", Operand: between})
 		}
-		return between
+		return boolean(between)
 	case "contains", "contains_cs", "containscs", "!contains", "!contains_cs", "notcontains", "notcontainscs":
 		caseSensitive := strings.Contains(op, "_cs") || strings.HasSuffix(op, "cs")
 		negative := strings.HasPrefix(op, "!") || strings.HasPrefix(op, "not")
-		return stringMatch(left, right, "both", caseSensitive, negative)
+		return boolean(stringMatch(left.SQL, right.SQL, "both", caseSensitive, negative))
 	case "startswith", "startswith_cs", "!startswith", "!startswith_cs":
-		return stringMatch(left, right, "suffix", strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
+		return boolean(stringMatch(left.SQL, right.SQL, "suffix", strings.Contains(op, "_cs"), strings.HasPrefix(op, "!")))
 	case "endswith", "endswith_cs", "!endswith", "!endswith_cs":
-		return stringMatch(left, right, "prefix", strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
+		return boolean(stringMatch(left.SQL, right.SQL, "prefix", strings.Contains(op, "_cs"), strings.HasPrefix(op, "!")))
 	case "matches regex":
-		return &sqlast.Regex{Value: left, Pattern: right, CaseSensitive: true}
+		return boolean(&sqlast.Regex{Value: left.SQL, Pattern: right.SQL, CaseSensitive: true})
 	case "has", "!has", "has_cs", "!has_cs", "hasprefix", "!hasprefix", "hasprefix_cs", "!hasprefix_cs", "hassuffix", "!hassuffix", "hassuffix_cs", "!hassuffix_cs":
 		if !supportsRegex(s.compiler.dialect) {
 			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a regex-capable SQL dialect")
-			return nil
+			return boundExpr{}
 		}
 		mode := "term"
 		if strings.Contains(op, "prefix") {
@@ -657,21 +771,21 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 		} else if strings.Contains(op, "suffix") {
 			mode = "suffix"
 		}
-		result, ok := termMatch(left, right, mode, strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
+		result, ok := s.termMatchExpression(left.SQL, value.Right, mode, strings.Contains(op, "_cs"), strings.HasPrefix(op, "!"))
 		if !ok {
 			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" currently requires one non-empty alphanumeric literal term")
-			return nil
+			return boundExpr{}
 		}
-		return result
+		return boolean(result)
 	case "has_any", "has_all":
 		if !supportsRegex(s.compiler.dialect) {
 			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a regex-capable SQL dialect")
-			return nil
+			return boundExpr{}
 		}
-		list, ok := right.(*sqlast.List)
+		list, ok := value.Right.(*kql.ListExpression)
 		if !ok || len(list.Items) == 0 {
 			s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" requires a non-empty literal term list")
-			return nil
+			return boundExpr{}
 		}
 		operator := "OR"
 		if op == "has_all" {
@@ -679,10 +793,10 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 		}
 		var result sqlast.Expr
 		for _, item := range list.Items {
-			match, matched := termMatch(left, item, "term", false, false)
+			match, matched := s.termMatchExpression(left.SQL, item, "term", false, false)
 			if !matched {
 				s.error("KQLL0404", value.Span, "operator.scalar."+op, op+" currently requires non-empty alphanumeric literal terms")
-				return nil
+				return boundExpr{}
 			}
 			if result == nil {
 				result = match
@@ -690,12 +804,63 @@ func (s *compileState) binary(value *kql.BinaryExpression) sqlast.Expr {
 				result = &sqlast.Binary{Left: result, Operator: operator, Right: match}
 			}
 		}
-		return result
+		return boolean(result)
 	case ":":
 		s.error("KQLL0404", value.Span, "operator.scalar.colon", ": search semantics require input schema information")
-		return nil
+		return boundExpr{}
 	}
-	return &sqlast.Binary{Left: left, Operator: op, Right: right}
+	resultType := left.Type
+	if op == "=" || op == "<>" || op == "<" || op == "<=" || op == ">" || op == ">=" || op == "AND" || op == "OR" || op == "IN" || op == "NOT IN" {
+		resultType = TypeBool
+	} else if left.Type == TypeReal || right.Type == TypeReal {
+		resultType = TypeReal
+	}
+	return boundExpr{SQL: &sqlast.Binary{Left: left.SQL, Operator: op, Right: right.SQL}, Type: resultType}
+}
+
+func isTermOperator(operator string) bool {
+	switch operator {
+	case "has", "!has", "has_cs", "!has_cs", "hasprefix", "!hasprefix", "hasprefix_cs", "!hasprefix_cs", "hassuffix", "!hassuffix", "hassuffix_cs", "!hassuffix_cs", "has_any", "has_all":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNullExpression(expression sqlast.Expr) bool {
+	literal, ok := expression.(*sqlast.Literal)
+	return ok && literal.Kind == sqlast.NullLiteral
+}
+
+func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expression, mode string, caseSensitive, negative bool) (sqlast.Expr, bool) {
+	literal, ok := expression.(*kql.LiteralExpression)
+	if !ok || literal.Kind != kql.StringToken {
+		return nil, false
+	}
+	term := unquoteKQL(literal.Text)
+	if !isAlphaNumeric(term) {
+		return nil, false
+	}
+	leftBoundary, rightBoundary := s.termBoundaries()
+	pattern := leftBoundary + term + rightBoundary
+	switch mode {
+	case "prefix":
+		pattern = leftBoundary + term + `[[:alnum:]]*`
+	case "suffix":
+		pattern = leftBoundary + `[[:alnum:]]*` + term + rightBoundary
+	}
+	result := sqlast.Expr(&sqlast.Regex{Value: left, Pattern: s.bind(pattern), CaseSensitive: caseSensitive})
+	if negative {
+		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
+	}
+	return result, true
+}
+
+func (s *compileState) termBoundaries() (string, string) {
+	if s.compiler.dialect.Name() == "sqlite" {
+		return `(^|[^A-Za-z0-9])`, `([^A-Za-z0-9]|$)`
+	}
+	return `(^|[^[:alnum:]])`, `([^[:alnum:]]|$)`
 }
 
 func stringMatch(left, right sqlast.Expr, wildcard string, caseSensitive, negative bool) sqlast.Expr {
@@ -766,105 +931,152 @@ func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
 	return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: text}
 }
 
-func (s *compileState) call(value *kql.CallExpression) sqlast.Expr {
+func (s *compileState) call(value *kql.CallExpression) boundExpr {
 	name, ok := value.Function.(*kql.NameExpression)
 	if !ok {
 		s.error("KQLL0501", value.Span, "function.dynamic", "dynamic function references are not supported")
-		return nil
+		return boundExpr{}
 	}
 	function := strings.ToLower(name.Name)
-	args := s.expressions(value.Args)
+	if function == "datetime" || function == "date" || function == "timespan" || function == "time" {
+		if len(value.Args) != 1 {
+			return s.arity(value, function, 1)
+		}
+		text := expressionText(value.Args[0])
+		if s.compiler.parameterization == BoundParameters {
+			resultType := TypeUnknown
+			if function == "datetime" || function == "date" {
+				resultType = TypeDateTime
+			}
+			return boundExpr{SQL: s.bind(text), Type: resultType}
+		}
+		kind, resultType := sqlast.IntervalLiteral, TypeUnknown
+		if function == "datetime" || function == "date" {
+			kind, resultType = sqlast.DateTimeLiteral, TypeDateTime
+		}
+		return boundExpr{SQL: &sqlast.Literal{Kind: kind, Value: text}, Type: resultType}
+	}
+	args := make([]sqlast.Expr, 0, len(value.Args))
+	argTypes := make([]ScalarType, 0, len(value.Args))
+	for _, argument := range value.Args {
+		bound := s.expression(argument)
+		if bound.SQL != nil {
+			args = append(args, bound.SQL)
+			argTypes = append(argTypes, bound.Type)
+		}
+	}
 	s.use("function."+function, "equivalent", value.Span)
 	if rule, ok := s.compiler.functionRules[function]; ok {
 		result, err := rule(args)
 		if err != nil {
 			s.error("KQLL0504", value.Span, "function."+function, err.Error())
-			return nil
+			return boundExpr{}
 		}
 		if result == nil {
 			s.error("KQLL0505", value.Span, "function."+function, "custom function rule returned a nil expression")
 		}
-		return result
+		return boundExpr{SQL: result, Type: functionType(function, argTypes)}
 	}
 	switch function {
 	case "iif", "iff":
 		if len(args) != 3 {
 			return s.arity(value, function, 3)
 		}
-		return &sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: args[1]}}, Else: args[2]}
+		return boundExpr{SQL: &sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: args[1]}}, Else: args[2]}, Type: argTypes[1]}
 	case "case":
 		if len(args) < 3 || len(args)%2 == 0 {
 			s.error("KQLB0502", value.Span, "function.case", "case requires condition/result pairs and an else expression")
-			return nil
+			return boundExpr{}
 		}
 		result := &sqlast.Case{Else: args[len(args)-1]}
 		for i := 0; i < len(args)-1; i += 2 {
 			result.Branches = append(result.Branches, sqlast.When{Condition: args[i], Result: args[i+1]})
 		}
-		return result
-	case "datetime", "date":
-		if len(value.Args) != 1 {
-			return s.arity(value, function, 1)
-		}
-		return &sqlast.Literal{Kind: sqlast.DateTimeLiteral, Value: expressionText(value.Args[0])}
-	case "timespan", "time":
-		if len(value.Args) != 1 {
-			return s.arity(value, function, 1)
-		}
-		return &sqlast.Literal{Kind: sqlast.IntervalLiteral, Value: expressionText(value.Args[0])}
+		return boundExpr{SQL: result, Type: argTypes[len(argTypes)-1]}
 	case "int", "int32", "long", "int64", "real", "double", "decimal":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
 		types := map[string]string{"int": "INTEGER", "int32": "INTEGER", "long": "BIGINT", "int64": "BIGINT", "real": "DOUBLE PRECISION", "double": "DOUBLE PRECISION", "decimal": "DECIMAL"}
-		return &sqlast.Cast{Expr: args[0], Type: types[function]}
+		return boundExpr{SQL: &sqlast.Cast{Expr: args[0], Type: types[function]}, Type: functionType(function, argTypes)}
 	case "tostring":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
-		return &sqlast.Cast{Expr: args[0], Type: "VARCHAR"}
+		return boundExpr{SQL: &sqlast.Cast{Expr: args[0], Type: "VARCHAR"}, Type: TypeString}
 	case "toint", "tolong", "toreal", "todouble", "todatetime", "todecimal", "tobool", "toboolean", "toguid":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
 		types := map[string]string{"toint": "INTEGER", "tolong": "BIGINT", "toreal": "DOUBLE PRECISION", "todouble": "DOUBLE PRECISION", "todatetime": "TIMESTAMP", "todecimal": "DECIMAL", "tobool": "BOOLEAN", "toboolean": "BOOLEAN", "toguid": "UUID"}
-		return &sqlast.Cast{Expr: args[0], Type: types[function], Safe: true}
+		return boundExpr{SQL: &sqlast.Cast{Expr: args[0], Type: types[function], Safe: true}, Type: functionType(function, argTypes)}
 	case "strcat":
-		return &sqlast.Call{Name: "concat", Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: "concat", Args: args}, Type: TypeString}
 	case "strlen":
-		return &sqlast.Call{Name: "length", Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: "length", Args: args}, Type: TypeLong}
 	case "tolower":
-		return &sqlast.Call{Name: "lower", Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: "lower", Args: args}, Type: TypeString}
 	case "toupper":
-		return &sqlast.Call{Name: "upper", Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: "upper", Args: args}, Type: TypeString}
 	case "substring":
-		return &sqlast.Call{Name: "substr", Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: "substr", Args: args}, Type: TypeString}
 	case "countif":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
-		return &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}
+		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: TypeLong}
 	case "sumif":
 		if len(args) != 2 {
 			return s.arity(value, function, 2)
 		}
-		return &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[1], Result: args[0]}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}
+		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[1], Result: args[0]}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: argTypes[0]}
 	case "count":
 		if len(args) == 0 {
 			args = []sqlast.Expr{&sqlast.Star{}}
 		}
-		return &sqlast.Call{Name: function, Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: TypeLong}
+	case "make_list":
+		if len(args) != 1 {
+			return s.arity(value, function, 1)
+		}
+		name := "json_group_array"
+		if s.compiler.dialect.Name() == "postgresql" {
+			name = "json_agg"
+		} else if s.compiler.dialect.Name() != "sqlite" {
+			s.error("KQLL0503", value.Span, "aggregate.make_list", "make_list requires an explicit dialect mapping")
+			return boundExpr{}
+		}
+		return boundExpr{SQL: &sqlast.Call{Name: name, Args: args}, Type: TypeDynamic}
 	case "sum", "avg", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
-		return &sqlast.Call{Name: function, Args: args}
+		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: functionType(function, argTypes)}
 	default:
 		s.error("KQLL0503", value.Span, "function."+function, "function "+function+" is recognized syntactically but has no safe SQL mapping")
-		return nil
+		return boundExpr{}
 	}
 }
 
-func (s *compileState) arity(value *kql.CallExpression, function string, expected int) sqlast.Expr {
+func (s *compileState) arity(value *kql.CallExpression, function string, expected int) boundExpr {
 	s.error("KQLB0501", value.Span, "function."+function, fmt.Sprintf("%s requires %d arguments", function, expected))
-	return nil
+	return boundExpr{}
+}
+
+func functionType(function string, arguments []ScalarType) ScalarType {
+	switch function {
+	case "int", "int32", "long", "int64", "toint", "tolong", "strlen", "count", "countif":
+		return TypeLong
+	case "real", "double", "decimal", "toreal", "todouble", "todecimal", "avg":
+		return TypeReal
+	case "tostring", "strcat", "tolower", "toupper", "substring", "toguid":
+		return TypeString
+	case "datetime", "date", "todatetime":
+		return TypeDateTime
+	case "tobool", "toboolean":
+		return TypeBool
+	case "make_list", "make_set":
+		return TypeDynamic
+	}
+	_ = arguments
+	return TypeUnknown
 }
 
 func (s *compileState) nextAlias() string {

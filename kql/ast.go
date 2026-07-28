@@ -149,6 +149,9 @@ type SampleDistinctSpec struct {
 	Count  Expression
 	Column Expression
 }
+
+// SearchSpec contains the scalar term searched across the visible schema.
+type SearchSpec struct{ Term Expression }
 type RawSpec struct{ Tokens []Token }
 
 func (ExpressionSpec) operatorBody()     {}
@@ -161,6 +164,7 @@ func (MvExpandSpec) operatorBody()       {}
 func (MvApplySpec) operatorBody()        {}
 func (AsSpec) operatorBody()             {}
 func (SampleDistinctSpec) operatorBody() {}
+func (SearchSpec) operatorBody()         {}
 func (RawSpec) operatorBody()            {}
 
 // Expression is a scalar KQL expression.
