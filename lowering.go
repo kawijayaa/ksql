@@ -3,6 +3,7 @@ package ksql
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -389,12 +390,12 @@ func (s *compileState) search(from *sqlast.Subquery, input Schema, operator kql.
 		return Relation{}
 	}
 	term := unquoteKQL(literal.Text)
-	if term == "" || !isAlphaNumeric(term) {
-		s.bindError("KQLB0352", literal.Span, "operator.search", "search term must be non-empty and alphanumeric")
+	if term == "" {
+		s.bindError("KQLB0352", literal.Span, "operator.search", "search term must be non-empty")
 		return Relation{}
 	}
 	leftBoundary, rightBoundary := s.termBoundaries()
-	pattern := leftBoundary + term + rightBoundary
+	pattern := leftBoundary + regexp.QuoteMeta(term) + rightBoundary
 	if s.compiler.limits.MaxRegexBytes > 0 && len(pattern) > s.compiler.limits.MaxRegexBytes {
 		s.bindError("KQLB0353", literal.Span, "operator.search", fmt.Sprintf("search pattern exceeds MaxRegexBytes (%d)", s.compiler.limits.MaxRegexBytes))
 		return Relation{}

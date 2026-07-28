@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v0.4.0 - 2026-07-29
+
+### Added
+
+- Opt-in SQLite regex pattern flags through
+  `WithRegexCaseInsensitiveFlag`, allowing compatible UDFs to perform
+  case-insensitive matching without changing either operand.
+
+### Changed
+
+- SQLite dynamic keys without double quotes or backslashes now use quoted JSON
+  path labels, including keys containing dots, spaces, and hyphens. Consecutive
+  safe property accesses collapse into one `json_extract` call; unsafe and
+  parameterized keys retain the `json_each` fallback.
+- Literal `search` terms may contain punctuation. Regex metacharacters are
+  escaped before whole-term matching and `MaxRegexBytes` validation.
+
 ## v0.3.0 - 2026-07-28
 
 ### Added

@@ -413,6 +413,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		}
 		return "CAST(" + expression + " AS " + e.Type + ")", nil
 	case *sqlast.Index:
+		if capability, ok := r.dialect.(interface {
+			JSONIndexPath(value string, keys []string) (string, bool)
+		}); ok {
+			if base, keys, ok := literalJSONIndexPath(e); ok {
+				value, err := r.expr(base)
+				if err != nil {
+					return "", err
+				}
+				if result, supported := capability.JSONIndexPath(value, keys); supported {
+					return result, nil
+				}
+			}
+		}
 		value, err := r.expr(e.Value)
 		if err != nil {
 			return "", err
@@ -466,6 +479,31 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported SQL expression node %T", expression)
 	}
+}
+
+func literalJSONIndexPath(expression *sqlast.Index) (sqlast.Expr, []string, bool) {
+	var reversed []string
+	var current sqlast.Expr = expression
+	for {
+		index, ok := current.(*sqlast.Index)
+		if !ok {
+			break
+		}
+		literal, ok := index.Index.(*sqlast.Literal)
+		if !ok || literal.Kind != sqlast.StringLiteral {
+			break
+		}
+		reversed = append(reversed, literal.Value)
+		current = index.Value
+	}
+	if len(reversed) < 2 {
+		return nil, nil, false
+	}
+	keys := make([]string, len(reversed))
+	for i := range reversed {
+		keys[len(reversed)-1-i] = reversed[i]
+	}
+	return current, keys, true
 }
 
 func (r renderer) expressions(expressions []sqlast.Expr) ([]string, error) {

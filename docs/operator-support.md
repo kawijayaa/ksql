@@ -13,7 +13,7 @@ positioned diagnostic and no partial SQL.
 | `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; wildcard forms unsupported |
 | `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
 | `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; unspecified columns retain input order |
-| `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent for one alphanumeric literal term; wide inputs can be bounded |
+| `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent for one non-empty literal string; regex metacharacters are escaped and wide inputs can be bounded |
 | `join kind=inner` | Yes | `JoinSpec` | Yes | Yes | SQLite | Explicit KQL output aliases; right collisions use deterministic numeric suffixes |
 | `leftouter`, `rightouter`, `fullouter` | Yes | `JoinSpec` | Yes | Yes | Renderer-dependent | Database join behavior; SQLite version must support requested join |
 | `leftsemi`, `leftanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite (`leftanti`) | Equivalent for supported key predicates |
@@ -30,10 +30,13 @@ positioned diagnostic and no partial SQL.
 
 ## SQLite details
 
-SQLite dynamic string keys lower through `json_each(... WHERE key = ...)`, which
-correctly addresses keys containing dots, quotes, and backslashes. Numeric
-indexes lower through JSON paths of the form `$[0]`. Nested accesses retain the
-input alias inside joins and JSON expansion.
+SQLite dynamic string literals without double quotes or backslashes lower
+through `json_extract` with quoted labels such as `$."a.b"` and
+`$."space key"`. Consecutive safe properties collapse into one path. Keys with
+double quotes or backslashes, and indexes rendered as parameters, retain the
+`json_each(... WHERE key = ...)` fallback. Numeric indexes lower through JSON
+paths of the form `$[0]`. Nested accesses retain the input alias inside joins
+and JSON expansion.
 
 SQLite union operands are rendered without invalid top-level parentheses.
 Operands containing `ORDER BY`, `LIMIT`, or nested unions are wrapped as derived
@@ -46,12 +49,18 @@ Stock SQLite has no KQL-compatible regular expression implementation. Configure
 an application UDF explicitly:
 
 ```go
-dialect.SQLite(dialect.WithRegexFunction("kql_regex"))
+dialect.SQLite(
+    dialect.WithRegexFunction("kql_regex"),
+    dialect.WithRegexCaseInsensitiveFlag("(?i)"),
+)
 ```
 
 The UDF receives `(pattern, value)`. Function names are validated as SQL
-identifiers. Without this option, `search`, `has`, and regex operators return a
-diagnostic; they are never lowered to `LIKE`.
+identifiers. The case-insensitive flag is optional and must be supported by the
+configured regex engine. When set, it prefixes case-insensitive patterns rather
+than lowercasing either operand; callers that omit it retain operand
+lowercasing. Without `WithRegexFunction`, `search`, `has`, and regex operators
+return a diagnostic; they are never lowered to `LIKE`.
 
 ## Known gaps
 

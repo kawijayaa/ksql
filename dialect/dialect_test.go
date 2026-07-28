@@ -116,15 +116,31 @@ func TestSQLiteJSONEach(t *testing.T) {
 }
 
 func TestSQLiteJSONIndexSyntax(t *testing.T) {
+	nested := &sqlast.Index{
+		Value: &sqlast.Index{
+			Value: &sqlast.Index{
+				Value: &sqlast.Identifier{Parts: []string{"d"}},
+				Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "process"},
+			},
+			Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "command line"},
+		},
+		Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "image-name"},
+	}
 	query := &sqlast.Select{Projections: []sqlast.SelectItem{
 		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "a.b"}}},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "space key"}}},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "hyphen-key"}}},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "it's"}}},
 		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: `a.b"\c`}}},
+		{Expr: nested},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Parameter{Index: 1, Kind: sqlast.StringLiteral}}},
 	}}
 	got, err := Render(SQLite(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `SELECT json_extract("d", '$[' || 0 || ']'), (SELECT value FROM json_each("d") WHERE key = 'a.b"\c' LIMIT 1)`; got != want {
+	if want := `SELECT json_extract("d", '$[' || 0 || ']'), json_extract("d", '$."a.b"'), json_extract("d", '$."space key"'), json_extract("d", '$."hyphen-key"'), json_extract("d", '$."it''s"'), (SELECT value FROM json_each("d") WHERE key = 'a.b"\c' LIMIT 1), json_extract("d", '$."process"."command line"."image-name"'), (SELECT value FROM json_each("d") WHERE key = ? LIMIT 1)`; got != want {
 		t.Fatalf("Render() = %q, want %q", got, want)
 	}
 }
@@ -139,6 +155,21 @@ func TestSQLiteRegexFunction(t *testing.T) {
 	}
 	if want := `SELECT kql_regex(lower('term'), lower("message"))`; got != want {
 		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+	got, err = Render(SQLite(WithRegexFunction("kql_regex"), WithRegexCaseInsensitiveFlag("(?i)")), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `SELECT kql_regex('(?i)' || 'term', "message")`; got != want {
+		t.Fatalf("Render() with case-insensitive flag = %q, want %q", got, want)
+	}
+	query.Projections[0].Expr.(*sqlast.Regex).CaseSensitive = true
+	got, err = Render(SQLite(WithRegexFunction("kql_regex"), WithRegexCaseInsensitiveFlag("(?i)")), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `SELECT kql_regex('term', "message")`; got != want {
+		t.Fatalf("Render() case-sensitive = %q, want %q", got, want)
 	}
 	if _, err := Render(SQLite(WithRegexFunction("bad();drop")), query); err == nil {
 		t.Fatal("invalid regex function name was accepted")

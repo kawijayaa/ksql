@@ -221,6 +221,44 @@ func TestCompileTermOperators(t *testing.T) {
 	}
 }
 
+func TestCompileSearchEscapesLiteralTerms(t *testing.T) {
+	catalog := testCatalog{"Events": {Name: "events", Schema: ksql.Schema{Columns: []ksql.Column{{Name: "Message", Type: ksql.TypeString}}}}}
+	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithCatalog(catalog))
+	tests := []struct {
+		name    string
+		query   string
+		pattern string
+	}{
+		{name: "alphanumeric unchanged", query: `Events | search "powershell"`, pattern: `(^|[^[:alnum:]])powershell([^[:alnum:]]|$)`},
+		{name: "IP literal", query: `Events | search "10.10.1.9" | take 100`, pattern: `(^|[^[:alnum:]])10\.10\.1\.9([^[:alnum:]]|$)`},
+		{name: "regex metacharacters", query: `Events | search "a+b?(c)"`, pattern: `(^|[^[:alnum:]])a\+b\?\(c\)([^[:alnum:]]|$)`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := compiler.Compile(test.query)
+			if !result.OK() {
+				t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+			}
+			if !strings.Contains(result.SQL, "'"+test.pattern+"'") {
+				t.Fatalf("Compile() SQL = %q, want pattern %q", result.SQL, test.pattern)
+			}
+		})
+	}
+}
+
+func TestCompileSearchRegexLimitUsesEscapedPattern(t *testing.T) {
+	catalog := testCatalog{"Events": {Name: "events", Schema: ksql.Schema{Columns: []ksql.Column{{Name: "Message", Type: ksql.TypeString}}}}}
+	pattern := `(^|[^[:alnum:]])a\+b\?([^[:alnum:]]|$)`
+	result := ksql.New(
+		dialect.PostgreSQL(),
+		ksql.WithCatalog(catalog),
+		ksql.WithLimits(ksql.Limits{MaxRegexBytes: len(pattern) - 1}),
+	).Compile(`Events | search "a+b?"`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLB0353" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
 func TestCompileTermOperatorRequiresRegex(t *testing.T) {
 	result := ksql.New(dialect.SQLite()).Compile(`Events | where state has "New"`)
 	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0404" {

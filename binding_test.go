@@ -63,7 +63,7 @@ func TestSchemaAwareInvestigationPipeline(t *testing.T) {
 	if !reflect.DeepEqual(result.Columns, wantColumns) {
 		t.Fatalf("Columns = %#v, want %#v", result.Columns, wantColumns)
 	}
-	if !strings.Contains(result.SQL, `json_each("RawData")`) || !strings.Contains(result.SQL, `key = 'command_line'`) {
+	if !strings.Contains(result.SQL, `json_extract("RawData", '$."process"."command_line"')`) {
 		t.Fatalf("SQL does not contain bound dynamic access: %s", result.SQL)
 	}
 }
@@ -193,8 +193,25 @@ func TestQualifiedDynamicJoinAccess(t *testing.T) {
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	if !strings.Contains(result.SQL, `json_each("_k0"."RawData")`) || !strings.Contains(result.SQL, `json_each("_k1"."RawData")`) {
+	if !strings.Contains(result.SQL, `json_extract("_k0"."RawData", '$."process"."command_line"')`) || !strings.Contains(result.SQL, `json_extract("_k1"."RawData", '$."process"."command_line"')`) {
 		t.Fatalf("qualified dynamic SQL = %s", result.SQL)
+	}
+}
+
+func TestParameterizedDynamicIndexRetainsJSONEach(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
+	result := compiler.Compile(`Events | project Nested=RawData.process.command_line, Bound=RawData["a.b"]`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	if !strings.Contains(result.SQL, `json_extract("RawData", '$."process"."command_line"')`) {
+		t.Fatalf("SQL does not collapse literal dynamic path: %s", result.SQL)
+	}
+	if !strings.Contains(result.SQL, `(SELECT value FROM json_each("RawData") WHERE key = ? LIMIT 1)`) {
+		t.Fatalf("SQL does not retain parameterized json_each access: %s", result.SQL)
+	}
+	if want := []any{"a.b"}; !reflect.DeepEqual(result.Args, want) {
+		t.Fatalf("Args = %#v, want %#v", result.Args, want)
 	}
 }
 

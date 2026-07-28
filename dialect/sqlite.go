@@ -2,7 +2,10 @@ package dialect
 
 import "strings"
 
-type sqlite struct{ regexFunction string }
+type sqlite struct {
+	regexFunction            string
+	regexCaseInsensitiveFlag string
+}
 
 // SQLiteOption configures optional SQLite capabilities supplied by an
 // application (usually through registered UDFs).
@@ -16,6 +19,12 @@ func WithRegexFunction(name string) SQLiteOption {
 			d.regexFunction = name
 		}
 	}
+}
+
+// WithRegexCaseInsensitiveFlag configures a regex pattern prefix used for
+// case-insensitive matches instead of lowercasing the pattern and value.
+func WithRegexCaseInsensitiveFlag(flag string) SQLiteOption {
+	return func(d *sqlite) { d.regexCaseInsensitiveFlag = flag }
 }
 
 // SQLite returns the SQLite renderer with JSON1-compatible access.
@@ -43,7 +52,11 @@ func (d sqlite) Regex(left, right string, caseSensitive bool) (string, bool) {
 		return "", false
 	}
 	if !caseSensitive {
-		left, right = "lower("+left+")", "lower("+right+")"
+		if d.regexCaseInsensitiveFlag != "" {
+			right = quoteString(d.regexCaseInsensitiveFlag) + " || " + right
+		} else {
+			left, right = "lower("+left+")", "lower("+right+")"
+		}
 	}
 	return d.regexFunction + "(" + right + ", " + left + ")", true
 }
@@ -54,10 +67,21 @@ func (sqlite) JSONIndexExpression(value, index string, numeric bool) string {
 	if numeric {
 		return "json_extract(" + value + ", '$[' || " + index + " || ']')"
 	}
+	if key, ok := decodeSQLStringLiteral(index); ok && safeSQLiteJSONKey(key) {
+		return sqliteJSONExtract(value, []string{key})
+	}
 	// json_each key comparison works for every object key, including quotes
 	// and backslashes, on SQLite versions whose JSON path parser cannot address
 	// those keys directly.
 	return "(SELECT value FROM json_each(" + value + ") WHERE key = " + index + " LIMIT 1)"
+}
+func (sqlite) JSONIndexPath(value string, keys []string) (string, bool) {
+	for _, key := range keys {
+		if !safeSQLiteJSONKey(key) {
+			return "", false
+		}
+	}
+	return sqliteJSONExtract(value, keys), true
 }
 func (sqlite) SafeCast(_, _ string) (string, bool)        { return "", false }
 func (sqlite) Series(_, _, _, _, _ string) (string, bool) { return "", false }
@@ -83,4 +107,38 @@ func validFunctionName(name string) bool {
 		}
 	}
 	return true
+}
+
+func decodeSQLStringLiteral(value string) (string, bool) {
+	if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
+		return "", false
+	}
+	var decoded strings.Builder
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\'' {
+			decoded.WriteByte(value[i])
+			continue
+		}
+		if i+1 >= len(value)-1 || value[i+1] != '\'' {
+			return "", false
+		}
+		decoded.WriteByte('\'')
+		i++
+	}
+	return decoded.String(), true
+}
+
+func safeSQLiteJSONKey(key string) bool {
+	return !strings.ContainsAny(key, `"\`)
+}
+
+func sqliteJSONExtract(value string, keys []string) string {
+	var path strings.Builder
+	path.WriteByte('$')
+	for _, key := range keys {
+		path.WriteString(`."`)
+		path.WriteString(key)
+		path.WriteByte('"')
+	}
+	return "json_extract(" + value + ", " + quoteString(path.String()) + ")"
 }

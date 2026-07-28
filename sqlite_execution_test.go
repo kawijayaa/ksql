@@ -33,7 +33,7 @@ func openInvestigationDB(t *testing.T) *sql.DB {
 	statements := []string{
 		`CREATE TABLE events (TimeGenerated TEXT, Host TEXT, Source TEXT, EventType TEXT, RawData TEXT)`,
 		`INSERT INTO events VALUES
-            ('2026-07-28T10:00:00Z', 'alpha', 'sysmon', 'process', '{"process":{"command_line":"PowerShell -enc x"},"items":[1,2,3],"a.b":11,"a\"b":12,"a\\b":13}'),
+			('2026-07-28T10:00:00Z', 'alpha', 'sysmon', 'process', '{"process":{"command_line":"PowerShell -enc x"},"ip":"10.10.1.9","literal":"a+b?","items":[1,2,3],"a.b":11,"a\"b":12,"a\\b":13}'),
             ('2026-07-28T09:00:00Z', 'beta', 'ual', 'login', '{"message":"ordinary","items":[]}')`,
 		`CREATE TABLE ual (User TEXT, Host TEXT)`,
 		`INSERT INTO ual VALUES ('alice', 'client-a'), ('bob', 'client-b')`,
@@ -49,7 +49,10 @@ func openInvestigationDB(t *testing.T) *sql.DB {
 }
 
 func sqliteCompiler() *ksql.Compiler {
-	return ksql.New(dialect.SQLite(dialect.WithRegexFunction("kql_regex")), ksql.WithCatalog(investigationCatalog()))
+	return ksql.New(dialect.SQLite(
+		dialect.WithRegexFunction("kql_regex"),
+		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
+	), ksql.WithCatalog(investigationCatalog()))
 }
 
 func queryRows(t *testing.T, db *sql.DB, result ksql.Result) [][]any {
@@ -111,6 +114,30 @@ func TestSQLiteExecProjectionAndSearch(t *testing.T) {
 	if len(rows) != 1 || rows[0][1] != "alpha" {
 		t.Fatalf("search rows = %#v", rows)
 	}
+	if regexp.MustCompile(`(?i)lower\(`).MatchString(search.SQL) || !regexp.MustCompile(`'\(\?i\)' \|\|`).MatchString(search.SQL) {
+		t.Fatalf("search SQL does not prefix the regex flag: %s", search.SQL)
+	}
+}
+
+func TestSQLiteExecSearchLiteralPunctuation(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := sqliteCompiler()
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "IP literal", query: `Events | search "10.10.1.9" | take 100`},
+		{name: "regex metacharacters", query: `Events | search "a+b?"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := compiler.Compile(test.query)
+			rows := queryRows(t, db, result)
+			if len(rows) != 1 || rows[0][1] != "alpha" {
+				t.Fatalf("rows = %#v; SQL = %s", rows, result.SQL)
+			}
+		})
+	}
 }
 
 func TestSQLiteExecDynamicPaths(t *testing.T) {
@@ -124,6 +151,14 @@ func TestSQLiteExecDynamicPaths(t *testing.T) {
 	want := [][]any{{int64(1), int64(11), int64(12), int64(13)}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("rows = %#v, want %#v; SQL = %s", rows, want, result.SQL)
+	}
+	for _, path := range []string{`$."items"`, `$."a.b"`} {
+		if !regexp.MustCompile(`json_extract\([^,]+, '` + regexp.QuoteMeta(path) + `'\)`).MatchString(result.SQL) {
+			t.Fatalf("SQL does not use safe JSON path %q: %s", path, result.SQL)
+		}
+	}
+	if !regexp.MustCompile(`json_each\([^)]*\).*key = 'a["\\]b'`).MatchString(result.SQL) {
+		t.Fatalf("SQL does not retain json_each for unsafe keys: %s", result.SQL)
 	}
 }
 

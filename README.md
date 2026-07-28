@@ -47,7 +47,10 @@ catalog := ksql.CatalogFunc(func(name string) (ksql.Table, bool) {
     }}}, true
 })
 compiler := ksql.New(
-    dialect.SQLite(dialect.WithRegexFunction("kql_regex")),
+    dialect.SQLite(
+        dialect.WithRegexFunction("kql_regex"),
+        dialect.WithRegexCaseInsensitiveFlag("(?i)"),
+    ),
     ksql.WithCatalog(catalog),
     ksql.WithParameters(),
 )
@@ -55,6 +58,10 @@ result := compiler.Compile(`Events | where Host == "untrusted" | project Host`)
 // result.SQL contains placeholders, result.Args contains values, and
 // result.Columns is the ordered KQL result schema.
 ```
+
+`WithRegexCaseInsensitiveFlag` is optional and should match the configured
+regex engine. When omitted, SQLite case-insensitive regex rendering preserves
+the existing behavior of lowercasing both operands.
 
 Renderers are included for ANSI SQL, PostgreSQL, SQLite, MySQL 8, and SQL
 Server. SQL is produced through a dialect-neutral AST; database-specific
