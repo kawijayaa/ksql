@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-07-28
+
 ### Added
 
 - Public `ScalarType`, `Column`, `Schema`, `Table`, `Catalog`, and `Relation`
@@ -20,12 +22,6 @@
   `project-reorder` lowering.
 - SQLite regex-UDF configuration through `WithRegexFunction`.
 - SQLite execution tests using JSON1 and an application-provided regex UDF.
-- Typed parsing for `mv-expand`, `mv-apply`, `as`, and `sample-distinct`.
-- SQLite single-array expansion with item indexes and per-row limits.
-- Row-wise SQLite `mv-apply` pipelines using `where`, `extend`, and `serialize`.
-- `sample`, `sample-distinct`, `in~`, and `!in~` lowering.
-- Literal KQL term matching for regex-capable PostgreSQL and MySQL dialects.
-- Optional random-ordering and JSON-expansion dialect capabilities.
 
 ### Changed
 
@@ -40,6 +36,20 @@
 - SQL union rendering now produces executable SQLite syntax for ordered,
   limited, and nested operands.
 - KQL null equality and inequality lower to `IS NULL` and `IS NOT NULL`.
+
+## v0.2.0 - 2026-07-26
+
+### Added
+
+- Typed parsing for `mv-expand`, `mv-apply`, `as`, and `sample-distinct`.
+- SQLite single-array expansion with item indexes and per-row limits.
+- Row-wise SQLite `mv-apply` pipelines using `where`, `extend`, and `serialize`.
+- `sample`, `sample-distinct`, `in~`, and `!in~` lowering.
+- Literal KQL term matching for regex-capable PostgreSQL and MySQL dialects.
+- Optional random-ordering and JSON-expansion dialect capabilities.
+
+### Changed
+
 - The feature ledger now reports the new equivalent and lossy translations.
 - Legacy `mvexpand` preserves its 128-row default limit.
 - Unsupported multi-value forms return focused diagnostics instead of the
