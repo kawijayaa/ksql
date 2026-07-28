@@ -1,72 +1,65 @@
 # Operator support
 
-Support means that the compiler emits executable SQL with documented semantic
-behavior. Syntax recognition alone is not counted as support. Unsupported forms
-return a stable diagnostic and no partial SQL.
+Support is recorded in separate dimensions. Syntax recognition does not imply
+binding, SQL lowering, or executable semantics. Unsupported forms return a
+positioned diagnostic and no partial SQL.
 
-## Recently added operators
+| Construct | Syntax | Typed AST | Bound | SQL lowered | Executed dialects | Semantics |
+| --- | --- | --- | --- | --- | --- | --- |
+| `where`, `project`, `extend`, `distinct` | Yes | Yes | Yes with catalog | Yes | SQLite; renderer tests for PostgreSQL/MySQL/SQL Server | Equivalent for covered scalar expressions |
+| `summarize` core aggregates | Yes | Yes | Yes with catalog | Yes | SQLite core; renderer tests elsewhere | Equivalent subject to database null/numeric behavior |
+| `make_list` | Yes | Yes | Yes | Yes | SQLite; PostgreSQL rendering | Lossy: result order is arbitrary without an explicit database order |
+| `sort`, `top`, `take`, `count` | Yes | Yes | Yes | Yes | SQLite and renderer tests | Equivalent; configured constant row bounds are enforced |
+| `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; wildcard forms unsupported |
+| `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
+| `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; unspecified columns retain input order |
+| `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent for one alphanumeric literal term; wide inputs can be bounded |
+| `join kind=inner` | Yes | `JoinSpec` | Yes | Yes | SQLite | Explicit KQL output aliases; right collisions use deterministic numeric suffixes |
+| `leftouter`, `rightouter`, `fullouter` | Yes | `JoinSpec` | Yes | Yes | Renderer-dependent | Database join behavior; SQLite version must support requested join |
+| `leftsemi`, `leftanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite (`leftanti`) | Equivalent for supported key predicates |
+| `rightsemi`, `rightanti`, `innerunique` | Yes | `JoinSpec` | Partial | No | None | Focused unsupported diagnostic |
+| `lookup` | Yes | `JoinSpec` | Yes | Yes | Renderer tests | Right same-name columns are omitted; size hints are not enforced |
+| `union` | Yes | `UnionSpec` | Ordered-schema validation | Positional `UNION ALL` | SQLite | Equivalent only for equal ordered schemas; KQL outer type/name merging unsupported |
+| `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value | SQLite JSON1 | Lossy SQLite casts; arrays/objects tested, multiple expansions unsupported |
+| `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize` | SQLite JSON1 | Equivalent for documented row-wise subset |
+| `mv-apply` aggregating | Yes | `MvApplySpec` | No | No | None | Unsupported with `KQLL0334` |
+| `parse`, `parse-where`, `parse-kv` | Yes | Opaque | No | No | None | Unsupported; no unchecked UDF lowering |
+| `evaluate bag_unpack` | Yes | Opaque | No | No | None | Unsupported; schema declaration is not yet typed |
+| `dcount` | Yes | Call expression | Diagnostic | No default | None | Approximate KQL semantics require an explicit compatible mapping |
+| `arg_min`, `arg_max` | Yes | Call expression | Diagnostic | No | None | Schema-aware window lowering remains unsupported |
 
-| KQL construct | SQL targets | Current scope |
-| --- | --- | --- |
-| `as` | All | Reusable pipeline aliases; `hint.materialized=true` is rejected because SQL targets cannot guarantee one evaluation. |
-| `sample` | PostgreSQL, SQLite, MySQL 8, SQL Server | Random ordering followed by the requested row limit. |
-| `sample-distinct` | PostgreSQL, SQLite, MySQL 8, SQL Server | Distinct values from one named column, randomly limited. |
-| `in~`, `!in~` | All | Case-folded comparison against a non-empty scalar value list. |
-| `has` family | PostgreSQL, MySQL 8 | Non-empty alphanumeric literal terms using regex term boundaries. Dynamic terms and punctuation-separated phrases are rejected. |
-| `mv-expand` | SQLite | One JSON array expression with a distinct output alias. Supports `with_itemindex`, `limit`, and `to typeof(...)`. |
-| `mv-apply` | SQLite | One JSON array expression with a distinct output alias. The inner pipeline may use `where`, `extend`, and `serialize`. |
+## SQLite details
 
-The legacy `mvexpand` spelling retains its default limit of 128 rows per input
-row. Modern `mv-expand` has no implicit practical limit.
+SQLite dynamic string keys lower through `json_each(... WHERE key = ...)`, which
+correctly addresses keys containing dots, quotes, and backslashes. Numeric
+indexes lower through JSON paths of the form `$[0]`. Nested accesses retain the
+input alias inside joins and JSON expansion.
 
-## SQLite multi-value expansion
+SQLite union operands are rendered without invalid top-level parentheses.
+Operands containing `ORDER BY`, `LIMIT`, or nested unions are wrapped as derived
+queries and execute inside joins and tabular bindings.
 
-Use a distinct output alias so the original JSON column can remain in the
-result:
+`== null` lowers to `IS NULL`; `!= null` and `<> null` lower to `IS NOT NULL`.
+JSON null expands to one null row, while an empty array expands to no rows.
 
-```kusto
-Events
-| mv-expand with_itemindex=i item=Items limit 10
+Stock SQLite has no KQL-compatible regular expression implementation. Configure
+an application UDF explicitly:
+
+```go
+dialect.SQLite(dialect.WithRegexFunction("kql_regex"))
 ```
 
-```kusto
-Events
-| mv-apply item=Items on (
-    where item > 1
-    | extend doubled = item * 2
-)
-```
+The UDF receives `(pattern, value)`. Function names are validated as SQL
+identifiers. Without this option, `search`, `has`, and regex operators return a
+diagnostic; they are never lowered to `LIKE`.
 
-SQLite has no `SELECT * EXCLUDE` or `SELECT * REPLACE`. Consequently, a bare
-replacement such as `mv-expand Items` cannot preserve the input schema without
-schema metadata and returns `KQLL0333`. Multiple arrays return `KQLL0331`.
-Row-reducing `mv-apply` subqueries such as `top`, `take`, or `summarize` return
-`KQLL0334` because applying them independently per source row requires lateral
-relation semantics that SQLite does not provide.
+## Known gaps
 
-JSON null produces one row with a null expanded value. An empty JSON array
-produces no rows. A per-row `limit` is implemented with the zero-based array
-index. SQLite casts do not reproduce KQL's null-on-failure conversion, so
-`to typeof(...)` emits warning `KQLL0336`.
-
-## Term matching
-
-PostgreSQL and MySQL 8 lower literal `has`, `has_cs`, `hasprefix`, `hassuffix`,
-their negated forms, `has_any`, and `has_all` through regex boundaries based on
-alphanumeric KQL terms. Stock SQLite and SQL Server have no compatible regex
-operator and return `KQLL0404`.
-
-A hyphen separates KQL terms. Use `contains` when searching for a literal
-hyphenated substring:
-
-```kusto
-Events
-| where RawData contains "target-string"
-```
-
-## Dialect extensions
-
-Random ordering and JSON expansion are optional dialect capabilities. They do
-not add methods to the public `dialect.Dialect` interface, so existing custom
-dialects remain source-compatible. A custom dialect can opt in by implementing
-`Random() (string, bool)` or `JSONEach(value, alias string) (string, bool)`.
+- Projection wildcards are not yet typed or bound.
+- `innerunique`, right-side semi/anti joins, parse operators, schema-declared
+  `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
+- Multiple-array expansion is rejected.
+- KQL outer-union name/type merging is not implemented.
+- SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
+- `MaxInputRowsPerStage` and `MaxParseCaptures` are reserved until supported
+  operators can enforce them without claiming execution guarantees.

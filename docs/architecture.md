@@ -5,10 +5,13 @@
 1. `kql.Lex` creates source-located tokens. KQL keywords remain contextual.
 2. `kql.Parse` creates typed scripts, pipelines, core operator bodies, and
    recognized raw bodies for advanced operators.
-3. The root compiler resolves `let` bindings and lowers supported KQL nodes to
-   `sqlast` queries and expressions.
-4. The `dialect` package renders the SQL AST for a concrete database.
-5. The compiler returns SQL only when no error diagnostic exists.
+3. Catalog binding resolves physical tables, scalar/tabular `let` bindings,
+   `as` aliases, columns, dynamic property access, and join-side scopes.
+4. Each bound pipeline stage produces a `Relation` containing a `sqlast.Query`
+   and an ordered `Schema`. Expressions are type-checked before their SQL AST
+   nodes are attached to that stage.
+5. The `dialect` package renders the SQL AST for a concrete database.
+6. The compiler returns SQL only when no error diagnostic exists.
 
 Pipeline stages lower to nested derived tables. This is intentionally verbose:
 it preserves KQL evaluation order and projection alias visibility. A future
@@ -33,6 +36,20 @@ KQL `has` is lowered only for literal terms on regex-capable dialects and is
 never silently rewritten to SQL `LIKE`; approximate `dcount` is not silently
 changed to exact `COUNT(DISTINCT ...)`.
 
+## Binding contract
+
+Catalog lookup and KQL column lookup are case-insensitive. Catalog column names
+remain case-preserving in result metadata. A dotted expression is resolved by
+scope, not capitalization: if its first component is a dynamic column, the
+remaining components become JSON property access; `$left` and `$right` resolve
+only inside joins. Unknown, ambiguous, and duplicate names are bind errors with
+source spans.
+
+Catalogs are optional for compatibility. A source without a catalog has an
+unknown/open schema: SQL lowering remains available, but validation or
+operators requiring enumeration (`search` and schema projections) reject that
+input. `Result.Columns` is complete only when the final schema is known.
+
 ## Extension rules
 
 Extensions are explicit compiler options and receive SQL AST nodes, not SQL
@@ -45,9 +62,33 @@ compiler := ksql.New(
 )
 ```
 
-`WithOperator` receives the preceding relation and parsed operator. `WithSource`
-receives a parsed source. These adapters are the intended integration point for
-installed UDFs, external tables, graph extensions, and plugin runtimes.
+`WithOperator` receives a `LoweringContext`, the preceding typed `Relation`, and
+the parsed operator. `WithSource` receives a context and parsed source. Rules
+can lower expressions or nested pipelines, bind parameters, allocate aliases,
+read schemas and the catalog, add positioned diagnostics, and inspect the
+selected dialect. They return SQL AST values, never SQL fragments. Tabular
+bindings are resolved before a source rule, so a physical source adapter cannot
+accidentally intercept `let` or `as` names.
+
+Compiler options and rule maps are fixed by `New`; per-compilation aliases,
+arguments, diagnostics, and bindings live in isolated state. A configured
+compiler is safe for concurrent use if its catalog is safe for concurrent
+reads.
+
+## Parameters and limits
+
+Literal rendering remains the default for compatibility. `WithParameters()`
+turns KQL scalar literals and extension `Bind` values into dialect placeholders
+and returns values in `Result.Args`. Arguments are allocated in SQL traversal
+order across nested relations. Identifiers, SQL types, function names, and sort
+directions are structural AST values and are never parameters.
+
+`WithLimits` configures syntax-driven bounds. Zero and negative values mean
+unlimited. `MaxSourceBytes`, `MaxOutputRows`, `MaxProjectionItems`,
+`MaxExpansionItems`, `MaxRegexBytes`, and `MaxJoinKeys` are enforced by current
+lowerings. `MaxInputRowsPerStage`, `MaxParseCaptures`, and execution-time row or
+memory limits are reserved for operators that can enforce them accurately;
+applications must still configure database cancellation and resource limits.
 
 ## Updating KQL
 
