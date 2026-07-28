@@ -374,6 +374,10 @@ func (s *compileState) search(from *sqlast.Subquery, input Schema, operator kql.
 		s.bindError("KQLB0350", operator.Span, "operator.search", "search requires a bound input schema")
 		return Relation{}
 	}
+	if maximum := s.compiler.limits.MaxProjectionItems; maximum > 0 && len(input.Columns) > maximum {
+		s.bindError("KQLB0355", operator.Span, "operator.search", fmt.Sprintf("search input exceeds MaxProjectionItems (%d)", maximum))
+		return Relation{}
+	}
 	spec, ok := operator.Body.(kql.SearchSpec)
 	if !ok {
 		s.error("KQLL0350", operator.Span, "operator.search", "unsupported search form")

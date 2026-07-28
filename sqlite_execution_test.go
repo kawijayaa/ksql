@@ -171,3 +171,24 @@ func TestSQLiteExecNullAndUnion(t *testing.T) {
 		t.Fatalf("union rows = %#v, want %#v; SQL = %s", rows, want, union.SQL)
 	}
 }
+
+func TestSQLiteExecMakeListMetadata(t *testing.T) {
+	db := openInvestigationDB(t)
+	result := sqliteCompiler().Compile(`Events | summarize Hosts=make_list(Host)`)
+	rows := queryRows(t, db, result)
+	if want := []ksql.Column{{Name: "Hosts", Type: ksql.TypeDynamic}}; !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("Columns = %#v, want %#v", result.Columns, want)
+	}
+	if want := [][]any{{`["alpha","beta"]`}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestSQLiteExecParameterizedInjectionValue(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
+	result := compiler.Compile(`Events | where Host == "alpha' OR 1=1 --" | count`)
+	if rows := queryRows(t, db, result); !reflect.DeepEqual(rows, [][]any{{int64(0)}}) {
+		t.Fatalf("rows = %#v; SQL = %s Args = %#v", rows, result.SQL, result.Args)
+	}
+}

@@ -66,7 +66,7 @@ func (r Result) OK() bool {
 // Compile parses and translates source. The method never emits partial SQL.
 func (c *Compiler) Compile(source string) Result {
 	if c.limits.MaxSourceBytes > 0 && len(source) > c.limits.MaxSourceBytes {
-		return Result{Diagnostics: []Diagnostic{{Code: "KQLB0001", Severity: SeverityError, Phase: PhaseBind, Message: fmt.Sprintf("query exceeds MaxSourceBytes (%d)", c.limits.MaxSourceBytes)}}}
+		return Result{Diagnostics: []Diagnostic{{Code: "KQLB0001", Severity: SeverityError, Phase: PhaseBind, Message: fmt.Sprintf("query exceeds MaxSourceBytes (%d)", c.limits.MaxSourceBytes), Span: kql.Span{Offset: 0, Length: len(source), Line: 1, Column: 1}}}}
 	}
 	tree, parseErrors := kql.Parse(source)
 	result := Result{Tree: tree}
@@ -377,6 +377,18 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 	items := make([]sqlast.SelectItem, 0, len(expressions))
 	schema := Schema{}
 	for _, expression := range expressions {
+		if _, star := expression.(*kql.StarExpression); star {
+			if input.Unknown {
+				items = append(items, sqlast.SelectItem{Expr: &sqlast.Star{}})
+				schema.Unknown = true
+				continue
+			}
+			for _, column := range input.Columns {
+				items = append(items, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name})
+				schema.Columns = append(schema.Columns, column)
+			}
+			continue
+		}
 		item := sqlast.SelectItem{}
 		bound := boundExpr{}
 		if named, ok := expression.(*kql.NamedExpression); ok {
@@ -397,8 +409,9 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 				name = bound.Name
 			}
 			if name == "" {
-				s.bindError("KQLB0404", expression.NodeSpan(), "operator.project", "expression requires an output name")
-				continue
+				name = fmt.Sprintf("Column%d", len(schema.Columns)+1)
+				item.Alias = name
+				items[len(items)-1].Alias = name
 			}
 			schema.Columns = append(schema.Columns, Column{Name: name, Type: bound.Type})
 		}
@@ -565,12 +578,12 @@ func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemI
 		s.error("KQLL0330", operator.Span, "operator."+operator.Kind, "dialect "+s.compiler.dialect.Name()+" has no JSON array expansion")
 		return Relation{}
 	}
-	if len(items) != 1 {
-		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" currently requires exactly one array expression")
-		return Relation{}
-	}
 	if s.compiler.limits.MaxExpansionItems > 0 && len(items) > s.compiler.limits.MaxExpansionItems {
 		s.bindError("KQLB0337", operator.Span, "operator."+operator.Kind, fmt.Sprintf("expansion exceeds MaxExpansionItems (%d)", s.compiler.limits.MaxExpansionItems))
+		return Relation{}
+	}
+	if len(items) != 1 {
+		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" currently requires exactly one array expression")
 		return Relation{}
 	}
 	item := items[0]
@@ -1047,6 +1060,12 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 			return boundExpr{}
 		}
 		return boundExpr{SQL: &sqlast.Call{Name: name, Args: args}, Type: TypeDynamic}
+	case "dcount":
+		s.error("KQLL0510", value.Span, "aggregate.dcount", "dcount is approximate in KQL and requires an explicit compatible aggregate mapping")
+		return boundExpr{}
+	case "arg_min", "arg_max":
+		s.error("KQLL0511", value.Span, "aggregate."+function, function+" requires schema-aware window lowering and is not enabled")
+		return boundExpr{}
 	case "sum", "avg", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
 		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: functionType(function, argTypes)}
 	default:
@@ -1075,7 +1094,12 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 	case "make_list", "make_set":
 		return TypeDynamic
 	}
-	_ = arguments
+	if len(arguments) > 0 {
+		switch function {
+		case "sum", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
+			return arguments[0]
+		}
+	}
 	return TypeUnknown
 }
 

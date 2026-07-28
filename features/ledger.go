@@ -271,7 +271,8 @@ source.table source.print source.range source.datatable statement.let statement.
 operator.where operator.project operator.extend operator.summarize
 operator.distinct operator.count operator.sort operator.take operator.top
 operator.join operator.lookup operator.union operator.as operator.sample
-operator.sample-distinct
+operator.sample-distinct operator.project-away operator.project-keep
+operator.project-rename operator.project-reorder operator.search
 operator.scalar.and operator.scalar.or operator.scalar.add
 operator.scalar.subtract operator.scalar.multiply operator.scalar.divide
 operator.scalar.modulo operator.scalar.less_than operator.scalar.less_than_or_equal
@@ -302,7 +303,7 @@ aggregate.min aggregate.max
 `
 
 const coreLossy = `
-operator.serialize operator.mv-expand operator.mv-apply
+operator.serialize operator.mv-expand operator.mv-apply aggregate.make_list
 function.toint function.tolong function.toreal
 function.todouble function.todatetime function.todecimal function.tobool
 function.toboolean function.toguid

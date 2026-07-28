@@ -114,3 +114,33 @@ func TestSQLiteJSONEach(t *testing.T) {
 		t.Fatalf("Render() = %q, want %q", got, want)
 	}
 }
+
+func TestSQLiteJSONIndexSyntax(t *testing.T) {
+	query := &sqlast.Select{Projections: []sqlast.SelectItem{
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}},
+		{Expr: &sqlast.Index{Value: &sqlast.Identifier{Parts: []string{"d"}}, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: `a.b"\c`}}},
+	}}
+	got, err := Render(SQLite(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `SELECT json_extract("d", '$[' || 0 || ']'), (SELECT value FROM json_each("d") WHERE key = 'a.b"\c' LIMIT 1)`; got != want {
+		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+}
+
+func TestSQLiteRegexFunction(t *testing.T) {
+	query := &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Regex{
+		Value: &sqlast.Identifier{Parts: []string{"message"}}, Pattern: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "term"},
+	}}}}
+	got, err := Render(SQLite(WithRegexFunction("kql_regex")), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `SELECT kql_regex(lower('term'), lower("message"))`; got != want {
+		t.Fatalf("Render() = %q, want %q", got, want)
+	}
+	if _, err := Render(SQLite(WithRegexFunction("bad();drop")), query); err == nil {
+		t.Fatal("invalid regex function name was accepted")
+	}
+}

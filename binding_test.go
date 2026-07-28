@@ -161,6 +161,43 @@ func TestBoundDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAmbiguousCatalogColumnDiagnostic(t *testing.T) {
+	catalog := testCatalog{"T": {Name: "t", Schema: ksql.Schema{Columns: []ksql.Column{
+		{Name: "Host", Type: ksql.TypeString}, {Name: "host", Type: ksql.TypeString},
+	}}}}
+	result := ksql.New(dialect.SQLite(), ksql.WithCatalog(catalog)).Compile(`T | project HOST`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLB0402" {
+		t.Fatalf("Compile() = %#v", result)
+	}
+}
+
+func TestParameterOrderingAcrossNestedRelations(t *testing.T) {
+	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
+	result := compiler.Compile(`Events | where Host == "left" | union (Events | where Host == "union") | join kind=inner (Sysmon | where Message == "right") on Host`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	want := []any{"left", "union", "right"}
+	if !reflect.DeepEqual(result.Args, want) {
+		t.Fatalf("Args = %#v, want %#v", result.Args, want)
+	}
+	for _, placeholder := range []string{"$1", "$2", "$3"} {
+		if !strings.Contains(result.SQL, placeholder) {
+			t.Fatalf("SQL lacks %s: %s", placeholder, result.SQL)
+		}
+	}
+}
+
+func TestQualifiedDynamicJoinAccess(t *testing.T) {
+	result := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog())).Compile(`Events | join kind=inner (Events) on $left.RawData.process.command_line == $right.RawData.process.command_line`)
+	if !result.OK() {
+		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
+	}
+	if !strings.Contains(result.SQL, `json_each("_k0"."RawData")`) || !strings.Contains(result.SQL, `json_each("_k1"."RawData")`) {
+		t.Fatalf("qualified dynamic SQL = %s", result.SQL)
+	}
+}
+
 func TestParameterizedLiteralsAndOrdering(t *testing.T) {
 	compiler := ksql.New(dialect.PostgreSQL(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
 	result := compiler.Compile(`Events | where Host == "x' OR 1=1 --" and Source == "second" | take 7`)
