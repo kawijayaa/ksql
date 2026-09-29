@@ -370,6 +370,41 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return strings.ToUpper(e.Name) + "(" + strings.Join(args, ", ") + ")", nil
+	case *sqlast.Window:
+		call, err := r.expr(e.Expr)
+		if err != nil {
+			return "", err
+		}
+		clauses := []string{}
+		if len(e.PartitionBy) > 0 {
+			parts, err := r.expressions(e.PartitionBy)
+			if err != nil {
+				return "", err
+			}
+			clauses = append(clauses, "PARTITION BY "+strings.Join(parts, ", "))
+		}
+		if len(e.OrderBy) > 0 {
+			parts := make([]string, 0, len(e.OrderBy))
+			for _, order := range e.OrderBy {
+				expression, err := r.expr(order.Expr)
+				if err != nil {
+					return "", err
+				}
+				direction := strings.ToUpper(order.Direction)
+				if direction != "" && direction != "ASC" && direction != "DESC" {
+					return "", fmt.Errorf("invalid window order direction %q", direction)
+				}
+				if order.Nulls != "" {
+					return "", fmt.Errorf("explicit window null ordering is not yet supported")
+				}
+				if direction != "" {
+					expression += " " + direction
+				}
+				parts = append(parts, expression)
+			}
+			clauses = append(clauses, "ORDER BY "+strings.Join(parts, ", "))
+		}
+		return call + " OVER (" + strings.Join(clauses, " ") + ")", nil
 	case *sqlast.List:
 		items, err := r.expressions(e.Items)
 		return "(" + strings.Join(items, ", ") + ")", err

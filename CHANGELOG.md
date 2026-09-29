@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Implement right semi/anti joins and default `innerunique` joins over column equality keys.
+- Add SQL window expressions and parameter normalization for subsequent window-based lowering.
+
+- Add `not()` Boolean negation with arity/type validation, null propagation, and Boolean result metadata.
+
 ## v0.4.0 - 2026-07-29
 
 ### Added

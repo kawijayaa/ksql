@@ -26,6 +26,14 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			for i := range value.Args {
 				value.Args[i] = expression(value.Args[i])
 			}
+		case *Window:
+			value.Expr = expression(value.Expr)
+			for i := range value.PartitionBy {
+				value.PartitionBy[i] = expression(value.PartitionBy[i])
+			}
+			for i := range value.OrderBy {
+				value.OrderBy[i].Expr = expression(value.OrderBy[i].Expr)
+			}
 		case *List:
 			for i := range value.Items {
 				value.Items[i] = expression(value.Items[i])

@@ -496,12 +496,24 @@ func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 	if condition == nil && (len(spec.Conditions) > 0 || spec.Condition != nil) {
 		return Relation{}
 	}
-	if spec.Kind == "leftanti" || spec.Kind == "leftsemi" {
-		exists := sqlast.Expr(&sqlast.Exists{Query: &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, From: &sqlast.Subquery{Query: right.Query, Alias: rightAlias}, Where: condition}})
-		if spec.Kind == "leftanti" {
+	if spec.Kind == "leftanti" || spec.Kind == "leftsemi" || spec.Kind == "rightanti" || spec.Kind == "rightsemi" {
+		outer, inner := input, right
+		outerAlias, innerAlias := leftAlias, rightAlias
+		if strings.HasPrefix(spec.Kind, "right") {
+			outer, inner = right, input
+			outerAlias, innerAlias = rightAlias, leftAlias
+		}
+		exists := sqlast.Expr(&sqlast.Exists{Query: &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, From: &sqlast.Subquery{Query: inner.Query, Alias: innerAlias}, Where: condition}})
+		if strings.HasSuffix(spec.Kind, "anti") {
 			exists = &sqlast.Unary{Operator: "NOT ", Operand: exists}
 		}
-		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: leftAlias}, Where: exists}, Schema: input.Schema.Clone()}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: outer.Query, Alias: outerAlias}, Where: exists}, Schema: outer.Schema.Clone()}
+	}
+	if spec.Kind == "innerunique" {
+		input = s.deduplicateJoinLeft(input, condition, leftAlias, rightAlias, operator)
+		if input.Query == nil {
+			return Relation{}
+		}
 	}
 	join := &sqlast.Join{
 		Left:  &sqlast.Subquery{Query: input.Query, Alias: leftAlias},
@@ -509,7 +521,7 @@ func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 		On:    condition,
 	}
 	switch spec.Kind {
-	case "inner":
+	case "inner", "innerunique":
 		join.Kind = "INNER"
 	case "leftouter":
 		join.Kind = "LEFT"
@@ -517,9 +529,6 @@ func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 		join.Kind = "RIGHT"
 	case "fullouter":
 		join.Kind = "FULL"
-	case "innerunique":
-		s.error("KQLL0310", operator.Span, "operator.join.innerunique", "innerunique deduplicates the left input and requires schema-aware window lowering")
-		return Relation{}
 	default:
 		s.error("KQLL0311", operator.Span, "operator."+operator.Kind+"."+spec.Kind, "join kind "+spec.Kind+" requires semi/anti relational lowering")
 		return Relation{}
@@ -1026,6 +1035,16 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 		return boundExpr{SQL: result, Type: functionType(function, argTypes)}
 	}
 	switch function {
+	case "not":
+		if len(args) != 1 {
+			return s.arity(value, function, 1)
+		}
+		if argTypes[0] != TypeBool && argTypes[0] != TypeUnknown {
+			s.bindError("KQLB0502", value.Span, "function.not", "not requires a Boolean expression")
+			return boundExpr{}
+		}
+		return boundExpr{SQL: &sqlast.Unary{Operator: "NOT ", Operand: args[0]}, Type: TypeBool}
+
 	case "iif", "iff":
 		if len(args) != 3 {
 			return s.arity(value, function, 3)
@@ -1125,7 +1144,7 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		return TypeString
 	case "datetime", "date", "todatetime":
 		return TypeDateTime
-	case "tobool", "toboolean":
+	case "not", "tobool", "toboolean":
 		return TypeBool
 	case "make_list", "make_set":
 		return TypeDynamic

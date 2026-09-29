@@ -291,7 +291,7 @@ operator.scalar.not_has_cs operator.scalar.hasprefix operator.scalar.hasprefix_c
 operator.scalar.not_hasprefix operator.scalar.not_hasprefix_cs
 operator.scalar.hassuffix operator.scalar.hassuffix_cs operator.scalar.not_hassuffix
 operator.scalar.not_hassuffix_cs operator.scalar.has_any operator.scalar.has_all
-function.iif function.iff function.case function.strcat function.strlen
+function.not function.iif function.iff function.case function.strcat function.strlen
 function.tolower function.toupper function.substring function.count function.sum
 function.sumif function.countif function.avg function.min function.max
 function.coalesce function.abs function.ceiling function.floor function.round

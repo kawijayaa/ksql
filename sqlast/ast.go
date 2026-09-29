@@ -124,6 +124,13 @@ type Call struct {
 	Name string
 	Args []Expr
 }
+
+// Window applies a SQL window function to a partition and ordering.
+type Window struct {
+	Expr        Expr
+	PartitionBy []Expr
+	OrderBy     []Order
+}
 type List struct{ Items []Expr }
 type Case struct {
 	Branches []When
@@ -161,6 +168,7 @@ func (*QualifiedStar) exprNode() {}
 func (*Random) exprNode()        {}
 func (*Unary) exprNode()         {}
 func (*Binary) exprNode()        {}
+func (*Window) exprNode()        {}
 func (*Call) exprNode()          {}
 func (*List) exprNode()          {}
 func (*Case) exprNode()          {}

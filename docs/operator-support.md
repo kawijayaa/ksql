@@ -17,7 +17,8 @@ positioned diagnostic and no partial SQL.
 | `join kind=inner` | Yes | `JoinSpec` | Yes | Yes | SQLite | Explicit KQL output aliases; right collisions use deterministic numeric suffixes |
 | `leftouter`, `rightouter`, `fullouter` | Yes | `JoinSpec` | Yes | Yes | Renderer-dependent | Database join behavior; SQLite version must support requested join |
 | `leftsemi`, `leftanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite (`leftanti`) | Equivalent for supported key predicates |
-| `rightsemi`, `rightanti`, `innerunique` | Yes | `JoinSpec` | Partial | No | None | Focused unsupported diagnostic |
+| `rightsemi`, `rightanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite | Right-only schema; right duplicates preserved; null keys do not match |
+| `innerunique` (default join) | Yes | `JoinSpec` | Bound left schema | Partitioned `ROW_NUMBER` then inner join | SQLite; other dialect renderer checks | One complete left representative per equality-key tuple; representative is unspecified |
 | `lookup` | Yes | `JoinSpec` | Yes | Yes | Renderer tests | Right same-name columns are omitted; size hints are not enforced |
 | `union` | Yes | `UnionSpec` | Ordered-schema validation | Positional `UNION ALL` | SQLite | Equivalent only for equal ordered schemas; KQL outer type/name merging unsupported |
 | `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value | SQLite JSON1 | Lossy SQLite casts; arrays/objects tested, multiple expansions unsupported |
@@ -65,7 +66,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 ## Known gaps
 
 - Projection wildcards are not yet typed or bound.
-- `innerunique`, right-side semi/anti joins, parse operators, schema-declared
+- Parse operators, schema-declared
   `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
 - Multiple-array expansion is rejected.
 - KQL outer-union name/type merging is not implemented.
