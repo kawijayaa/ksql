@@ -135,6 +135,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 ## Documentation
 
 - [Compiler architecture and extension rules](docs/architecture.md)
+- [Native Kusto query and management service client](docs/native-kusto.md)
 - [Operator support and dialect limits](docs/operator-support.md)
 - [Scalar and tabular query-defined functions](docs/query-functions.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)

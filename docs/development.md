@@ -18,6 +18,7 @@ in one large file.
 | `sqlast/` | Dialect-neutral SQL AST and traversal with package tests |
 | `dialect/` | Database renderers and their tests |
 | `features/`, `inventory/` | Support ledger and pinned Microsoft source metadata |
+| `kusto/` | Independent native Kusto REST execution and bounded response decoding |
 | `tests/compiler/` | Public API, schema, resource-limit, SQLite execution, and fuzz regression tests |
 | `examples/` | Runnable library examples |
 | `docs/` | Architecture, feature guides, support limits, and development |
