@@ -47,12 +47,16 @@ type Table struct {
 	Name    string
 	Columns []Column
 	Rows    [][]json.RawMessage
+	// Progress is the last service estimate, if a TableProgress frame appeared.
+	// Successful completion is determined by completion records, not this value.
+	Progress *float64
 }
 
 type Result struct {
-	Tables     []Table
-	RequestID  string
-	ActivityID string
+	Tables      []Table
+	RequestID   string
+	ActivityID  string
+	Progressive bool
 }
 
 // PrimaryTables selects query/command result tables while retaining the full

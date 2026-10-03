@@ -89,11 +89,14 @@ type Request struct {
 	Options         map[string]any
 	Parameters      map[string]string
 	ClientRequestID string
+	// Progressive requests progressive v2 frames. Client reconstructs their
+	// final tables before returning; it does not expose intermediate results.
+	Progressive bool
 }
 
-// Query uses the v2 query endpoint. Only buffered results are supported; the
-// progressive request option is forced to false. Client adds no application-level
-// retries, including after a transport error with an uncertain execution outcome.
+// Query uses the v2 query endpoint, with buffered or progressive wire results.
+// Client adds no application-level retries, including after a transport error
+// with an uncertain execution outcome.
 func (c *Client) Query(ctx context.Context, request Request) (*Result, error) {
 	return c.execute(ctx, request, false)
 }
@@ -109,6 +112,9 @@ func (c *Client) Management(ctx context.Context, request Request) (*Result, erro
 func (c *Client) execute(ctx context.Context, request Request, management bool) (*Result, error) {
 	if ctx == nil {
 		return nil, errors.New("kusto: context is required")
+	}
+	if management && request.Progressive {
+		return nil, errors.New("kusto: progressive results require the query endpoint")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -143,7 +149,7 @@ func (c *Client) execute(ctx context.Context, request Request, management bool) 
 		options[name] = value
 	}
 	if !management {
-		options["results_progressive_enabled"] = false
+		options["results_progressive_enabled"] = request.Progressive
 	}
 	properties, err := json.Marshal(struct {
 		Options         map[string]any    `json:"Options,omitempty"`
@@ -209,15 +215,12 @@ func (c *Client) execute(ctx context.Context, request Request, management bool) 
 	if contentType := response.Header.Get("Content-Type"); contentType != "" {
 		mediaType, _, err := mime.ParseMediaType(contentType)
 		if err != nil || (mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json")) {
-			return nil, protocolError("expected a JSON response")
+			return nil, &ServiceError{StatusCode: response.StatusCode, RequestID: requestID, ActivityID: activityID, Details: data, cause: protocolError("expected a JSON response")}
 		}
 	}
-	result, err := decodeResponse(data, management)
+	result, err := decodeResponseContext(ctx, data, management)
 	if err != nil {
-		if errors.Is(err, ErrPartial) || errors.Is(err, ErrCancelled) {
-			return nil, &ServiceError{StatusCode: response.StatusCode, RequestID: requestID, ActivityID: activityID, Details: data, cause: err}
-		}
-		return nil, err
+		return nil, &ServiceError{StatusCode: response.StatusCode, RequestID: requestID, ActivityID: activityID, Details: data, cause: err}
 	}
 	result.RequestID, result.ActivityID = requestID, activityID
 	return result, nil

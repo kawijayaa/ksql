@@ -2,6 +2,7 @@ package kusto
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"unicode/utf8"
@@ -13,9 +14,20 @@ const (
 	maxTotalColumns = 16384
 	maxRows         = 100000
 	maxCells        = 1000000
+	maxFrames       = 65536
 )
 
-type decodeBudget struct{ columns, rows, cells int }
+type decodeBudget struct {
+	columns, rows, cells int
+	ctx                  context.Context
+}
+
+func (b *decodeBudget) checkContext() error {
+	if b.ctx != nil {
+		return b.ctx.Err()
+	}
+	return nil
+}
 
 func decoder(data []byte) *json.Decoder {
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -24,13 +36,31 @@ func decoder(data []byte) *json.Decoder {
 }
 
 func decodeResponse(data []byte, management bool) (*Result, error) {
+	return decodeResponseContext(context.Background(), data, management)
+}
+
+func decodeResponseContext(ctx context.Context, data []byte, management bool) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !utf8.Valid(data) {
 		return nil, protocolError("response is not UTF-8")
 	}
+	budget := &decodeBudget{ctx: ctx}
+	var result *Result
+	var err error
 	if management {
-		return decodeV1(data)
+		result, err = decodeV1(data, budget)
+	} else {
+		result, err = decodeV2(data, budget)
 	}
-	return decodeV2(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Fields are read individually and bounded before constructing objects. Rows and
@@ -91,16 +121,24 @@ func field(fields map[string]json.RawMessage, name string, value any) error {
 	return nil
 }
 
-func decodeV2(data []byte) (*Result, error) {
+func decodeV2(data []byte, budget *decodeBudget) (*Result, error) {
 	d := decoder(data)
 	if err := delimiter(d, '['); err != nil {
 		return nil, err
 	}
 	result := &Result{}
-	budget := &decodeBudget{}
-	ids := make(map[int]bool)
+	ids := make(map[int]int)
+	active := make(map[int]bool)
 	header, completion := false, false
+	frames := 0
 	for d.More() {
+		if err := budget.checkContext(); err != nil {
+			return nil, err
+		}
+		if frames >= maxFrames {
+			return nil, ErrLimit
+		}
+		frames++
 		if completion {
 			return nil, protocolError("frames after dataset completion")
 		}
@@ -121,20 +159,28 @@ func decodeV2(data []byte) (*Result, error) {
 				return nil, protocolError("duplicate dataset header")
 			}
 			var version string
-			var progressive bool
 			if err := field(fields, "Version", &version); err != nil {
 				return nil, err
 			}
-			if err := field(fields, "IsProgressive", &progressive); err != nil {
+			if err := field(fields, "IsProgressive", &result.Progressive); err != nil {
 				return nil, err
 			}
-			if version != "v2.0" || progressive {
-				return nil, protocolError("only buffered v2.0 results are supported")
+			if version != "v2.0" {
+				return nil, protocolError("only v2.0 results are supported")
 			}
 			header = true
-		case "DataTable":
+		case "DataTable", "TableHeader":
+			if kind == "TableHeader" && !result.Progressive {
+				return nil, protocolError("progressive frame in buffered dataset")
+			}
 			if len(result.Tables) >= maxTables {
 				return nil, ErrLimit
+			}
+			if kind == "TableHeader" {
+				if _, present := fields["Rows"]; present {
+					return nil, protocolError("table header cannot contain rows")
+				}
+				fields["Rows"] = json.RawMessage("[]")
 			}
 			table, err := decodeTable(fields, budget)
 			if err != nil {
@@ -143,10 +189,11 @@ func decodeV2(data []byte) (*Result, error) {
 			if err := field(fields, "TableId", &table.ID); err != nil {
 				return nil, err
 			}
-			if table.ID < 0 || ids[table.ID] {
+			_, seen := ids[table.ID]
+			if table.ID < 0 || seen {
 				return nil, protocolError("invalid or duplicate table ID")
 			}
-			ids[table.ID] = true
+			ids[table.ID] = len(result.Tables)
 			if err := field(fields, "TableKind", &table.Kind); err != nil {
 				return nil, err
 			}
@@ -157,6 +204,27 @@ func decodeV2(data []byte) (*Result, error) {
 				return nil, err
 			}
 			result.Tables = append(result.Tables, table)
+			if kind == "TableHeader" {
+				active[table.ID] = true
+			}
+		case "TableFragment", "TableProgress", "TableCompletion":
+			if !result.Progressive {
+				return nil, protocolError("progressive frame in buffered dataset")
+			}
+			var id int
+			if err := field(fields, "TableId", &id); err != nil {
+				return nil, err
+			}
+			if !active[id] {
+				return nil, protocolError("frame references an unknown or completed table")
+			}
+			table := &result.Tables[ids[id]]
+			if err := applyProgressiveFrame(table, kind, fields, budget); err != nil {
+				return nil, err
+			}
+			if kind == "TableCompletion" {
+				delete(active, id)
+			}
 		case "DataSetCompletion":
 			var failed, cancelled bool
 			if err := field(fields, "HasErrors", &failed); err != nil {
@@ -182,9 +250,12 @@ func decodeV2(data []byte) (*Result, error) {
 			if failed {
 				return nil, ErrPartial
 			}
+			if len(active) != 0 {
+				return nil, protocolError("dataset completed with incomplete tables")
+			}
 			completion = true
 		default:
-			return nil, protocolError("unknown or progressive frame")
+			return nil, protocolError("unknown frame")
 		}
 	}
 	if err := delimiter(d, ']'); err != nil {
@@ -199,7 +270,7 @@ func decodeV2(data []byte) (*Result, error) {
 	return result, nil
 }
 
-func decodeV1(data []byte) (*Result, error) {
+func decodeV1(data []byte, budget *decodeBudget) (*Result, error) {
 	d := decoder(data)
 	fields, err := object(d)
 	if err != nil {
@@ -220,8 +291,10 @@ func decodeV1(data []byte) (*Result, error) {
 		return nil, err
 	}
 	result := &Result{}
-	budget := &decodeBudget{}
 	for tables.More() {
+		if err := budget.checkContext(); err != nil {
+			return nil, err
+		}
 		if len(result.Tables) >= maxTables {
 			return nil, ErrLimit
 		}
@@ -333,6 +406,9 @@ func decodeTable(fields map[string]json.RawMessage, budget *decodeBudget) (Table
 		return table, err
 	}
 	for columns.More() {
+		if err := budget.checkContext(); err != nil {
+			return table, err
+		}
 		if len(table.Columns) >= maxColumns || budget.columns >= maxTotalColumns {
 			return table, ErrLimit
 		}
@@ -362,52 +438,71 @@ func decodeTable(fields map[string]json.RawMessage, budget *decodeBudget) (Table
 	if err := end(columns); err != nil {
 		return table, err
 	}
+	var err error
+	table.Rows, err = decodeRows(fields, len(table.Columns), budget)
+	return table, err
+}
+
+func decodeRows(fields map[string]json.RawMessage, width int, budget *decodeBudget) ([][]json.RawMessage, error) {
 	rowData, present := fields["Rows"]
 	if !present {
-		return table, protocolError("missing Rows")
+		return nil, protocolError("missing Rows")
 	}
 	rows := decoder(rowData)
 	if err := delimiter(rows, '['); err != nil {
-		return table, err
+		return nil, err
 	}
+	var result [][]json.RawMessage
 	for rows.More() {
+		if err := budget.checkContext(); err != nil {
+			return nil, err
+		}
 		if budget.rows >= maxRows {
-			return table, ErrLimit
+			return nil, ErrLimit
 		}
-		if err := delimiter(rows, '['); err != nil {
-			return table, err
+		rowToken, err := rows.Token()
+		if err != nil {
+			return nil, protocolError("invalid row structure")
 		}
-		row := make([]json.RawMessage, 0, len(table.Columns))
+		// Kusto can inject a OneAPI error object between rows after HTTP
+		// 200. A dynamic object cell remains inside a normal row array.
+		if rowToken == json.Delim('{') {
+			return nil, ErrPartial
+		}
+		if rowToken != json.Delim('[') {
+			return nil, protocolError("invalid row structure")
+		}
+		row := make([]json.RawMessage, 0, width)
 		for rows.More() {
-			if len(row) >= len(table.Columns) {
-				return table, protocolError("row width differs from schema")
+			if len(row) >= width {
+				return nil, protocolError("row width differs from schema")
 			}
 			if budget.cells >= maxCells {
-				return table, ErrLimit
+				return nil, ErrLimit
 			}
 			var cell json.RawMessage
 			if err := rows.Decode(&cell); err != nil {
-				return table, protocolError("invalid cell")
+				return nil, protocolError("invalid cell")
 			}
 			row = append(row, cell)
 			budget.cells++
 		}
 		if err := delimiter(rows, ']'); err != nil {
-			return table, err
+			return nil, err
 		}
-		if len(row) != len(table.Columns) {
-			return table, protocolError("row width differs from schema")
+		if len(row) != width {
+			return nil, protocolError("row width differs from schema")
 		}
-		table.Rows = append(table.Rows, row)
+		result = append(result, row)
 		budget.rows++
 	}
 	if err := delimiter(rows, ']'); err != nil {
-		return table, err
+		return nil, err
 	}
 	if err := end(rows); err != nil {
-		return table, err
+		return nil, err
 	}
-	return table, nil
+	return result, nil
 }
 
 func statusFailure(table Table) error {

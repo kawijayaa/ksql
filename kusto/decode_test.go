@@ -19,7 +19,6 @@ func TestMalformedResponsesFailClosed(t *testing.T) {
 		{"missing-header", `[{"FrameType":"DataSetCompletion","HasErrors":false,"Cancelled":false}]`, false},
 		{"no-completion", `[{"FrameType":"DataSetHeader","Version":"v2.0","IsProgressive":false}]`, false},
 		{"wrong-version", strings.Replace(successfulV2, `v2.0`, `v3.0`, 1), false},
-		{"progressive", strings.Replace(successfulV2, `"IsProgressive":false`, `"IsProgressive":true`, 1), false},
 		{"unknown-frame", strings.Replace(successfulV2, `"FrameType":"DataTable"`, `"FrameType":"UnknownFrame"`, 1), false},
 		{"trailing-json", successfulV2 + `{}`, false},
 		{"duplicate-fields", strings.Replace(successfulV2, `"HasErrors":false`, `"HasErrors":false,"HasErrors":false`, 1), false},
@@ -121,7 +120,7 @@ func TestTableOfContentsAndCompletionLevels(t *testing.T) {
 }
 
 func FuzzDecodeResponse(f *testing.F) {
-	for _, body := range []string{successfulV2, successfulV1, `null`, `{"Tables":[null]}`, `[]`, `[{"FrameType":"DataSetHeader"}]`} {
+	for _, body := range []string{successfulV2, successfulV1, successfulProgressive, `null`, `{"Tables":[null]}`, `[]`, `[{"FrameType":"DataSetHeader"}]`} {
 		f.Add([]byte(body), false)
 		f.Add([]byte(body), true)
 	}
