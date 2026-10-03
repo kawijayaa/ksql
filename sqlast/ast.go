@@ -162,6 +162,13 @@ type Cast struct {
 	Type string
 	Safe bool
 }
+
+// DynamicValue encodes a known scalar as a JSON dynamic value. Kind carries
+// the KQL type, since SQLite stores Booleans using integer values.
+type DynamicValue struct {
+	Value Expr
+	Kind  string
+}
 type Index struct {
 	Value Expr
 	Index Expr
@@ -203,6 +210,7 @@ func (*Call) exprNode()            {}
 func (*List) exprNode()            {}
 func (*Case) exprNode()            {}
 func (*Cast) exprNode()            {}
+func (*DynamicValue) exprNode()    {}
 func (*Index) exprNode()           {}
 func (*Regex) exprNode()           {}
 func (*Exists) exprNode()          {}

@@ -90,6 +90,16 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 		return boundExpr{SQL: &sqlast.Star{}, Type: TypeUnknown, Name: "*"}
 	case *kql.UnaryExpression:
 		operand := s.expression(value.Operand)
+		if operand.SQL == nil {
+			return boundExpr{}
+		}
+		if operand.Type != TypeUnknown && operand.Type != TypeInt && operand.Type != TypeLong && operand.Type != TypeReal {
+			s.bindError("KQLB0409", value.Span, "operator.scalar.unary", "unary arithmetic requires a numeric value; dynamic and temporal overloads require a compatible runtime")
+			return boundExpr{}
+		}
+		if operand.Type == TypeInt && !constantScalarSQL(operand.SQL) {
+			operand.Type = TypeLong
+		}
 		return boundExpr{SQL: &sqlast.Unary{Operator: value.Operator, Operand: operand.SQL}, Type: operand.Type}
 	case *kql.BinaryExpression:
 		return s.binary(value)
@@ -129,4 +139,23 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 		s.error("KQLL0402", expression.NodeSpan(), "expression.unknown", fmt.Sprintf("unsupported expression node %T", expression))
 		return boundExpr{}
 	}
+}
+
+// Literal/cast expressions can fold without unary int promotion. Columns and
+// extension calls are nonconstant; never infer extension purity from its name.
+func constantScalarSQL(expression sqlast.Expr) bool {
+	constant := true
+	sqlast.Walk(expression, func(node any) bool {
+		if _, ok := node.(sqlast.Expr); !ok {
+			return true
+		}
+		switch node.(type) {
+		case *sqlast.Literal, *sqlast.Parameter, *sqlast.Cast, *sqlast.Unary, *sqlast.Binary, *sqlast.Case:
+			return true
+		default:
+			constant = false
+			return false
+		}
+	})
+	return constant
 }

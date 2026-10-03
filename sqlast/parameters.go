@@ -53,6 +53,8 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			value.Else = expression(value.Else)
 		case *Cast:
 			value.Expr = expression(value.Expr)
+		case *DynamicValue:
+			value.Value = expression(value.Value)
 		case *Index:
 			value.Value, value.Index = expression(value.Value), expression(value.Index)
 		case *Regex:

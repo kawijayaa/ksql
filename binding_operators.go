@@ -21,6 +21,14 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 	if !isTermOperator(op) {
 		right = s.expression(value.Right)
 	}
+	if op == "and" || op == "or" {
+		for _, operand := range []boundExpr{left, right} {
+			if operand.Type != TypeBool && operand.Type != TypeUnknown {
+				s.bindError("KQLB0410", value.Span, scalarOperatorID(op), "logical operators require Boolean operands; dynamic overloads require a compatible runtime")
+				return boundExpr{}
+			}
+		}
+	}
 	s.use(scalarOperatorID(op), "equivalent", value.Span)
 	if op == "+" || op == "-" || op == "*" || op == "/" || op == "%" {
 		if left.Type == TypeString || right.Type == TypeString || left.Type == TypeBool || right.Type == TypeBool {

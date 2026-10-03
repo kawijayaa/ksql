@@ -162,3 +162,16 @@ func sqliteJSONExtract(value string, keys []string) string {
 func (sqlite) RankedValue(value, rank string) (string, bool) {
 	return "MAX(CASE WHEN " + rank + " = 1 THEN " + value + " END)", true
 }
+
+func (sqlite) DynamicValue(value, kind string) (string, bool) {
+	switch kind {
+	case "bool":
+		// Simple CASE evaluates the expression once and preserves null.
+		return "CASE " + value + " WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE NULL END", true
+	case "int", "long", "real", "string":
+		// JSON() rejects nonfinite numeric encodings; NULLIF retains the
+		// dynamic null convention without repeating the operand or parameters.
+		return "NULLIF(json(json_quote(" + value + ")), 'null')", true
+	}
+	return "", false
+}

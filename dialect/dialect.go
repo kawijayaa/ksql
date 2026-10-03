@@ -390,6 +390,13 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		return "", fmt.Errorf("dialect %s has no random ordering expression", r.dialect.Name())
 	case *sqlast.Unary:
 		operand, err := r.expr(e.Operand)
+		if e.Operator == "-" || e.Operator == "+" {
+			if number, ok := e.Operand.(*sqlast.Literal); ok && number.Kind == sqlast.NumberLiteral && !strings.HasPrefix(number.Value, "-") && !strings.HasPrefix(number.Value, "+") {
+				// Preserve SQLite's exact signed-minimum integer token.
+				return e.Operator + operand, err
+			}
+			return e.Operator + "(" + operand + ")", err
+		}
 		return e.Operator + operand, err
 	case *sqlast.Binary:
 		left, err := r.expr(e.Left)
@@ -493,6 +500,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return "", fmt.Errorf("dialect %s has no safe cast", r.dialect.Name())
 		}
 		return "CAST(" + expression + " AS " + e.Type + ")", nil
+	case *sqlast.DynamicValue:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			DynamicValue(string, string) (string, bool)
+		}); ok {
+			if encoded, supported := capability.DynamicValue(value, e.Kind); supported {
+				return encoded, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s cannot encode dynamic %s values", r.dialect.Name(), e.Kind)
 	case *sqlast.Index:
 		if capability, ok := r.dialect.(interface {
 			JSONIndexPath(value string, keys []string) (string, bool)

@@ -43,6 +43,31 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		}
 		return boundExpr{SQL: &sqlast.Literal{Kind: kind, Value: text}, Type: resultType}
 	}
+	if s.compiler.functionRules[function] == nil && s.compiler.typedFunctionRules[function] == nil {
+		// Reject bounded built-ins before expanding their arguments. Explicit
+		// extensions keep precedence and their own signature policies.
+		n := len(value.Args)
+		switch function {
+		case "coalesce":
+			if n < 2 || n > 64 {
+				s.bindError("KQLB0501", value.Span, "function.coalesce", "coalesce requires 2 to 64 arguments")
+				return boundExpr{}
+			}
+		case "case":
+			if n < 3 || n%2 == 0 || n > 129 {
+				s.bindError("KQLB0502", value.Span, "function.case", "case requires 1 to 64 condition/result pairs and an else expression")
+				return boundExpr{}
+			}
+		case "iff", "iif":
+			if n != 3 {
+				return s.arity(value, function, 3)
+			}
+		case "bool", "boolean":
+			if n != 1 {
+				return s.arity(value, function, 1)
+			}
+		}
+	}
 	args := make([]sqlast.Expr, 0, len(value.Args))
 	argTypes := make([]ScalarType, 0, len(value.Args))
 	firstName := ""
@@ -109,6 +134,15 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		return boundExpr{SQL: result, Type: functionType(function, argTypes)}
 	}
 	switch function {
+	case "bool", "boolean":
+		if len(args) != 1 {
+			return s.arity(value, function, 1)
+		}
+		if argTypes[0] != TypeBool && !isNullExpression(args[0]) {
+			s.bindError("KQLB0502", value.Span, "function."+function, "Boolean literals require true, false or null; use tobool for conversions")
+			return boundExpr{}
+		}
+		return boundExpr{SQL: args[0], Type: TypeBool}
 	case "not":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
@@ -123,17 +157,54 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		if len(args) != 3 {
 			return s.arity(value, function, 3)
 		}
-		return boundExpr{SQL: &sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: args[1]}}, Else: args[2]}, Type: argTypes[1]}
-	case "case":
-		if len(args) < 3 || len(args)%2 == 0 {
-			s.error("KQLB0502", value.Span, "function.case", "case requires condition/result pairs and an else expression")
+		if !s.booleanArgument(value, function, argTypes[0]) {
 			return boundExpr{}
 		}
-		result := &sqlast.Case{Else: args[len(args)-1]}
-		for i := 0; i < len(args)-1; i += 2 {
-			result.Branches = append(result.Branches, sqlast.When{Condition: args[i], Result: args[i+1]})
+		branches, typ, ok := s.commonBranches(value, function, args[1:], argTypes[1:], true)
+		if !ok {
+			return boundExpr{}
 		}
-		return boundExpr{SQL: result, Type: argTypes[len(argTypes)-1]}
+		return boundExpr{SQL: &sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: branches[0]}}, Else: branches[1]}, Type: typ}
+	case "case":
+		if len(args) < 3 || len(args)%2 == 0 || len(args) > 129 {
+			s.error("KQLB0502", value.Span, "function.case", "case requires 1 to 64 condition/result pairs and an else expression")
+			return boundExpr{}
+		}
+		values, types := []sqlast.Expr{}, []ScalarType{}
+		for i := 0; i < len(args)-1; i += 2 {
+			if !s.booleanArgument(value, function, argTypes[i]) {
+				return boundExpr{}
+			}
+			values, types = append(values, args[i+1]), append(types, argTypes[i+1])
+		}
+		values, types = append(values, args[len(args)-1]), append(types, argTypes[len(args)-1])
+		branches, typ, ok := s.commonBranches(value, function, values, types, true)
+		if !ok {
+			return boundExpr{}
+		}
+		result := &sqlast.Case{Else: branches[len(branches)-1]}
+		for i := 0; i < len(args)-1; i += 2 {
+			result.Branches = append(result.Branches, sqlast.When{Condition: args[i], Result: branches[i/2]})
+		}
+		return boundExpr{SQL: result, Type: typ}
+	case "coalesce":
+		if len(args) < 2 || len(args) > 64 {
+			s.bindError("KQLB0501", value.Span, "function.coalesce", "coalesce requires 2 to 64 arguments")
+			return boundExpr{}
+		}
+		branches, typ, ok := s.commonBranches(value, function, args, argTypes, false)
+		if !ok {
+			return boundExpr{}
+		}
+		if typ == TypeString {
+			for i, expr := range branches {
+				// NULLIF evaluates its argument once, including volatile functions.
+				branches[i] = &sqlast.Call{Name: "nullif", Args: []sqlast.Expr{expr, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}
+			}
+			// KQL strings have an empty-string missing value rather than null.
+			branches = append(branches, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""})
+		}
+		return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: branches}, Type: typ}
 	case "int", "int32", "long", "int64", "real", "double", "decimal":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
@@ -195,7 +266,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	case "arg_min", "arg_max", "argmin", "argmax", "take_any", "any", "take_anyif", "anyif":
 		s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
 		return boundExpr{}
-	case "sum", "avg", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
+	case "sum", "avg", "min", "max", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
 		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: functionType(function, argTypes)}
 	default:
 		s.error("KQLL0503", value.Span, "function."+function, "function "+function+" is recognized syntactically but has no safe SQL mapping")

@@ -6,6 +6,14 @@ import (
 
 type postgres struct{}
 
+func (postgres) DynamicValue(value, kind string) (string, bool) {
+	types := map[string]string{"bool": "BOOLEAN", "int": "INTEGER", "long": "BIGINT", "real": "DOUBLE PRECISION", "string": "TEXT"}
+	if typ, ok := types[kind]; ok {
+		return "to_jsonb(CAST(" + value + " AS " + typ + "))", true
+	}
+	return "", false
+}
+
 // PostgreSQL returns the PostgreSQL renderer.
 func PostgreSQL() Dialect { return postgres{} }
 

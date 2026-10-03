@@ -100,6 +100,7 @@ func FuzzQueryFunctions(f *testing.F) {
 		`let f=(x:long){x}; print f(x=)`,
 		`let f=(x:long){let g=(){x}; g()}; print f(2)`,
 		`print (())()`, `print (()).x`,
+		`print a=case(true,1,"x"),b=coalesce("","y"),c=-(-1)`,
 		`let f=(x:long=1+1){x}; print 1`,
 		`let f=(x:dynamic){x.["a"]}; print f(dynamic({"a":1}))`,
 		`let f=(T:(x:long)){T}; f((print x=2))`,
