@@ -112,7 +112,9 @@ See [`docs/operator-support.md`](docs/operator-support.md) for dialect-specific
 operator behavior and current multi-value expansion limits.
 
 Applications can explicitly supply database extensions or UDF mappings with
-`WithFunction`, `WithOperator`, and `WithSource`. Source and operator rules
+`WithFunction`, `WithTypedFunction`, `WithAggregate`, `WithTypedAggregate`,
+`WithOperator`, and `WithSource`. Aggregate runtime mappings require the aggregate
+APIs to bind row arguments in summarize; scalar mappings preserve scalar scope. Source and operator rules
 receive a `LoweringContext`, lower to `sqlast` nodes, and return a typed
 `Relation`; source rules are invoked only after tabular `let` and `as`
 resolution. See

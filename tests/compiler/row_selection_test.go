@@ -164,7 +164,7 @@ func TestArgSelectionErrorsLimitsAndMappings(t *testing.T) {
 		}
 	}
 	// Explicit scalar extensions keep their existing precedence.
-	result = ksql.New(dialect.SQLite(), ksql.WithFunction("arg_max", ksql.SQLFunction("max"))).Compile(`datatable(n:long)[1,2]|summarize latest=arg_max(n)`)
+	result = ksql.New(dialect.SQLite(), ksql.WithAggregate("arg_max", ksql.SQLFunction("max"))).Compile(`datatable(n:long)[1,2]|summarize latest=arg_max(n)`)
 	if got := fmt.Sprint(queryRows(t, openInvestigationDB(t), result)); got != `[[2]]` {
 		t.Fatal(got)
 	}

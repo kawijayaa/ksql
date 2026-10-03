@@ -15,6 +15,7 @@ type compileState struct {
 	tabularLets            map[string]Relation
 	functions              map[string]*boundFunction
 	aggregationAllowed     bool
+	aggregateExpressions   map[sqlast.Expr]struct{}
 	functionDepth          int
 	functionValidation     bool
 	functionWork           int

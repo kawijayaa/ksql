@@ -87,7 +87,8 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 		return boundExpr{SQL: expr, Type: TypeDynamic}
 
 	case *kql.StarExpression:
-		return boundExpr{SQL: &sqlast.Star{}, Type: TypeUnknown, Name: "*"}
+		s.bindError("KQLB0513", value.Span, "expression.scalar", "wildcard is not a scalar expression")
+		return boundExpr{}
 	case *kql.UnaryExpression:
 		operand := s.expression(value.Operand)
 		if operand.SQL == nil {

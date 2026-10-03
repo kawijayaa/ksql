@@ -69,6 +69,8 @@ func TestCoreAggregatesEvaluateArgumentsOnce(t *testing.T) {
 			expression, want string
 			calls            int64
 		}{
+			{`tick()`, `[[1]]`, 1},
+			{`toscalar(print tick())`, `[[1]]`, 1},
 			{`sumif(tick(),n>1)`, `[[3]]`, 2}, {`avgif(tick(),n>1)`, `[[1.5]]`, 2},
 			{`minif(tick(),n>1)`, `[[1]]`, 2}, {`maxif(tick(),n>1)`, `[[2]]`, 2},
 			{`countif(tick()>0)`, `[[3]]`, 3}, {`sumif(tick(),false)`, `[[0]]`, 0}, {`avgif(tick(),false)`, `[[<nil>]]`, 0},

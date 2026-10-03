@@ -59,6 +59,9 @@ func (s *compileState) defaultColumnName(span kql.Span, includeRowScope bool) st
 }
 
 func (s *compileState) hasInputName(name string) bool {
+	if s.aggregationAllowed {
+		return false
+	}
 	_, _, found, ambiguous := s.input.Lookup(name)
 	return found || ambiguous
 }
@@ -82,6 +85,10 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 			}
 			return boundExpr{SQL: expr, Type: TypeDynamic, Name: strings.Join(parts, "_")}
 		}
+	}
+	if s.aggregationAllowed {
+		s.bindError("KQLB0513", value.Span, "operator.summarize", "input column "+value.Name+" must be inside an aggregate function")
+		return boundExpr{}
 	}
 	if len(parts) > 1 && s.qualifiers != nil {
 		if scope, ok := s.qualifiers[strings.ToLower(parts[0])]; ok {
@@ -129,6 +136,10 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 }
 
 func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationScope, parts []string) boundExpr {
+	if s.aggregationAllowed {
+		s.bindError("KQLB0513", value.Span, "operator.summarize", "input column "+value.Name+" must be inside an aggregate function")
+		return boundExpr{}
+	}
 	if len(parts) == 0 {
 		s.bindError("KQLB0401", value.Span, "expression.name", "missing qualified column")
 		return boundExpr{}

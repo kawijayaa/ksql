@@ -154,7 +154,7 @@ func TestTakeAnyDiagnosticsLimitsAndOverrides(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 	for _, fn := range []string{"take_any", "any", "take_anyif", "anyif"} {
-		r := ksql.New(dialect.SQLite(), ksql.WithFunction(fn, ksql.SQLFunction("max"))).Compile(`datatable(n:long)[1,2]|summarize v=` + fn + `(n)`)
+		r := ksql.New(dialect.SQLite(), ksql.WithAggregate(fn, ksql.SQLFunction("max"))).Compile(`datatable(n:long)[1,2]|summarize v=` + fn + `(n)`)
 		if got := fmt.Sprint(queryRows(t, openInvestigationDB(t), r)); got != `[[2]]` {
 			t.Fatal(got)
 		}

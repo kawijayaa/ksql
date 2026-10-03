@@ -88,7 +88,11 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return Relation{}
 		}
 		s.validateUnique(groupSchema.Columns, operator.Span, feature)
-		return Relation{Query: &sqlast.Select{From: from, Projections: append(groupItems, aggregateItems...), GroupBy: groups}, Schema: groupSchema}
+		query := &sqlast.Select{From: from, Projections: append(groupItems, aggregateItems...), GroupBy: groups}
+		if len(groups) == 0 && !s.hasAggregateResult(aggregateItems) {
+			return s.constantSummary(query, groupSchema, operator.Span)
+		}
+		return Relation{Query: query, Schema: groupSchema}
 	case "distinct":
 		spec := operator.Body.(kql.ExpressionSpec)
 		items, schema := s.projectItems(spec.Expressions, false, input.Schema, false)

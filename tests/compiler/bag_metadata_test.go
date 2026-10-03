@@ -8,7 +8,7 @@ import (
 
 func TestMappedBagAggregatesHaveDynamicMetadata(t *testing.T) {
 	for _, name := range []string{"make_bag", "make_bag_if", "make_dictionary"} {
-		compiler := ksql.New(dialect.SQLite(), ksql.WithFunction(name, ksql.SQLFunction("custom_bag")))
+		compiler := ksql.New(dialect.SQLite(), ksql.WithAggregate(name, ksql.SQLFunction("custom_bag")))
 		args := "x"
 		if name == "make_bag_if" {
 			args += ",true"

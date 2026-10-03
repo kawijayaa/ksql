@@ -43,22 +43,35 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		}
 		return boundExpr{SQL: &sqlast.Literal{Kind: kind, Value: text}, Type: resultType}
 	}
+	if s.isAggregate(function) {
+		if !s.aggregationAllowed {
+			s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
+			return boundExpr{}
+		}
+		if s.compiler.functionRules[function] == nil && s.compiler.typedFunctionRules[function] == nil {
+			if isCoreAggregate(function) && !s.aggregateArity(value, function) {
+				return boundExpr{}
+			}
+			if function == "make_list" && len(value.Args) != 1 {
+				return s.arity(value, function, 1)
+			}
+		}
+		defer func() {
+			if result.SQL != nil {
+				if s.aggregateExpressions == nil {
+					s.aggregateExpressions = make(map[sqlast.Expr]struct{})
+				}
+				s.aggregateExpressions[result.SQL] = struct{}{}
+			}
+		}()
+		previous := s.aggregationAllowed
+		s.aggregationAllowed = false
+		defer func() { s.aggregationAllowed = previous }()
+	}
 	if s.compiler.functionRules[function] == nil && s.compiler.typedFunctionRules[function] == nil {
 		// Reject bounded built-ins before expanding their arguments. Explicit
 		// extensions keep precedence and their own signature policies.
 		n := len(value.Args)
-		if isCoreAggregate(function) {
-			if !s.aggregationAllowed {
-				s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
-				return boundExpr{}
-			}
-			if !s.aggregateArity(value, function) {
-				return boundExpr{}
-			}
-			// Aggregate arguments are row expressions; nested aggregates are invalid.
-			s.aggregationAllowed = false
-			defer func() { s.aggregationAllowed = true }()
-		}
 		switch function {
 		case "coalesce":
 			if n < 2 || n > 64 {
@@ -93,6 +106,10 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	arguments := value.Args
 	if function == "pack_array" && len(arguments) == 1 {
 		if _, ok := arguments[0].(*kql.StarExpression); ok {
+			if s.aggregationAllowed {
+				s.bindError("KQLB0513", value.Span, "operator.summarize", "pack_array(*) cannot read input columns outside an aggregate function")
+				return boundExpr{}
+			}
 			if s.input.Unknown || len(s.input.Columns) == 0 {
 				s.bindError("KQLB0512", value.Span, "function.pack_array", "pack_array(*) requires a known non-empty input schema")
 				return boundExpr{}
@@ -104,6 +121,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 			arguments = nil
 		}
 	}
+	argumentFailed := false
 	for _, argument := range arguments {
 		bound := s.expression(argument)
 		if bound.SQL != nil {
@@ -112,7 +130,12 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 			}
 			args = append(args, bound.SQL)
 			argTypes = append(argTypes, bound.Type)
+		} else {
+			argumentFailed = true
 		}
+	}
+	if argumentFailed {
+		return boundExpr{}
 	}
 	s.use("function."+function, "equivalent", value.Span)
 	if rule, ok := s.compiler.typedFunctionRules[function]; ok {

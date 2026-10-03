@@ -25,14 +25,40 @@ type TypedExpression struct {
 // TypedFunctionRule can validate argument types and specify the result type.
 type TypedFunctionRule func(arguments []TypedExpression) (TypedExpression, error)
 
-// WithTypedFunction registers a typed function mapping. The last registration
-// for a name wins, including registrations using WithFunction.
+// WithTypedFunction registers a typed scalar function mapping. The last
+// non-empty, non-nil scalar or aggregate registration for a name wins.
 func WithTypedFunction(name string, rule TypedFunctionRule) Option {
 	return func(compiler *Compiler) {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name != "" && rule != nil {
 			compiler.typedFunctionRules[name] = rule
 			delete(compiler.functionRules, name)
+			delete(compiler.aggregateRules, name)
+		}
+	}
+}
+
+// WithTypedAggregate registers a typed aggregate mapping. Its arguments bind
+// in row scope and its result is valid only in an aggregation context. The last
+// registration wins across scalar and aggregate, typed and untyped mappings.
+func WithTypedAggregate(name string, rule TypedFunctionRule) Option {
+	return func(compiler *Compiler) {
+		WithTypedFunction(name, rule)(compiler)
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && rule != nil {
+			compiler.aggregateRules[name] = true
+		}
+	}
+}
+
+// WithAggregate registers an aggregate mapping with untyped SQL arguments.
+// Prefer WithTypedAggregate when the runtime requires type validation.
+func WithAggregate(name string, rule FunctionRule) Option {
+	return func(compiler *Compiler) {
+		WithFunction(name, rule)(compiler)
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && rule != nil {
+			compiler.aggregateRules[name] = true
 		}
 	}
 }
@@ -67,14 +93,18 @@ const (
 	BoundParameters
 )
 
-// WithFunction registers an explicit KQL function mapping. It overrides a
-// built-in mapping with the same name. Invalid or empty names are ignored.
+// WithFunction registers an explicit scalar function mapping. Use WithAggregate
+// for SQL aggregates so their arguments bind in row scope. Compiler-owned special
+// constructs (materialize, toscalar and datetime/timespan literals) retain their
+// handling.
+// Invalid or empty names are ignored.
 func WithFunction(name string, rule FunctionRule) Option {
 	return func(compiler *Compiler) {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name != "" && rule != nil {
 			compiler.functionRules[name] = rule
 			delete(compiler.typedFunctionRules, name)
+			delete(compiler.aggregateRules, name)
 		}
 	}
 }

@@ -99,7 +99,7 @@ func initEntries() {
 		}
 
 		setSupport(coreEquivalent, Validated, Equivalent, "lowered through the dialect-neutral SQL AST")
-		setSupport("aggregate.count aggregate.countif aggregate.sum aggregate.sumif aggregate.avg aggregate.avgif aggregate.min aggregate.minif aggregate.max aggregate.maxif", Validated, Equivalent, "validated core aggregate signatures and contexts; numeric conditional execution and empty defaults tested on SQLite; temporal/decimal overloads, ordering and engine differential conformance remain incomplete; see docs/core-aggregates.md")
+		setSupport("aggregate.count aggregate.countif aggregate.sum aggregate.sumif aggregate.avg aggregate.avgif aggregate.min aggregate.minif aggregate.max aggregate.maxif", Validated, Equivalent, "validated core aggregate signatures, row/result scopes and singleton constant summaries; numeric conditional execution and empty defaults tested on SQLite; temporal/decimal overloads, ordering and engine differential conformance remain incomplete; see docs/core-aggregates.md")
 		setSupport("operator.invoke", Validated, Equivalent, "named query functions with a first tabular parameter; inline functions and stored functions remain unsupported")
 		setSupport("function.iif function.iff function.case function.coalesce", Validated, Equivalent, "represented common types and bounded signatures; dynamic string conversion, full tags and differential behavior remain incomplete; see docs/scalar-semantics.md")
 		setSupport(coreLossy, Validated, Lossy, "translation has a documented KQL/SQL semantic difference")

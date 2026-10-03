@@ -3,9 +3,19 @@ package ksql
 import (
 	"strings"
 
+	featureledger "github.com/kawijayaa/ksql/features"
+
 	"github.com/kawijayaa/ksql/kql"
 	"github.com/kawijayaa/ksql/sqlast"
 )
+
+func (s *compileState) isAggregate(name string) bool {
+	if s.compiler.functionRules[name] != nil || s.compiler.typedFunctionRules[name] != nil {
+		return s.compiler.aggregateRules[name]
+	}
+	_, ok := featureledger.Lookup("aggregate." + name)
+	return ok
+}
 
 func isCoreAggregate(name string) bool {
 	switch name {
@@ -19,6 +29,12 @@ func (s *compileState) aggregateItems(expressions []kql.Expression, schema Schem
 	previous := s.aggregationAllowed
 	s.aggregationAllowed = true
 	defer func() { s.aggregationAllowed = previous }()
+	for _, expression := range expressions {
+		if _, star := expression.(*kql.StarExpression); star {
+			s.bindError("KQLB0513", expression.NodeSpan(), "operator.summarize", "summarize result expressions cannot contain bare input columns or wildcard projections")
+			return nil, Schema{}
+		}
+	}
 	return s.projectItems(expressions, true, schema, false)
 }
 
@@ -104,4 +120,53 @@ func (s *compileState) coreAggregate(call *kql.CallExpression, name string, args
 		result = &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{result, zero}}
 	}
 	return boundExpr{SQL: result, Type: functionType(name, types)}
+}
+
+// Inspect emitted result expressions rather than bound calls: scalar extension
+// rules can discard aggregate arguments, and independent subqueries do not
+// aggregate this stage. If expansion cloned a marker, an extra hidden COUNT is
+// harmless; failure to anchor an actual constant result changes cardinality.
+func (s *compileState) hasAggregateResult(items []sqlast.SelectItem) bool {
+	found := false
+	for _, item := range items {
+		sqlast.Walk(item.Expr, func(node any) bool {
+			if _, query := node.(sqlast.Query); query {
+				return false
+			}
+			if expr, ok := node.(sqlast.Expr); ok {
+				if _, marked := s.aggregateExpressions[expr]; marked {
+					found = true
+					return false
+				}
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+// SQL projections alone do not form a group. A hidden COUNT anchors constant
+// summaries to one row even when their input is empty; the outer projection
+// removes it without evaluating result expressions or parameters again.
+func (s *compileState) constantSummary(query *sqlast.Select, schema Schema, span kql.Span) Relation {
+	if len(schema.Columns) == 0 {
+		s.error("KQLL0514", span, "operator.summarize", "zero-column summarize results require a runtime that can represent zero-column tables")
+		return Relation{}
+	}
+	name := s.nextAlias() + "_aggregate_anchor"
+	for {
+		if _, _, found, _ := schema.Lookup(name); !found {
+			break
+		}
+		name = s.nextAlias() + "_aggregate_anchor"
+	}
+	query.Projections = append(query.Projections, sqlast.SelectItem{Expr: &sqlast.Call{Name: "count", Args: []sqlast.Expr{&sqlast.Star{}}}, Alias: name})
+	items := make([]sqlast.SelectItem, 0, len(schema.Columns))
+	for _, column := range schema.Columns {
+		items = append(items, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name})
+	}
+	return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: query, Alias: s.nextAlias()}, Projections: items}, Schema: schema}
 }

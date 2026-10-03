@@ -14,6 +14,7 @@ type Compiler struct {
 	dialect            dialect.Dialect
 	functionRules      map[string]FunctionRule
 	typedFunctionRules map[string]TypedFunctionRule
+	aggregateRules     map[string]bool
 	operatorRules      map[string]OperatorRule
 	sourceRules        map[string]SourceRule
 	catalog            Catalog
@@ -27,7 +28,8 @@ func New(target dialect.Dialect, options ...Option) *Compiler {
 		target = dialect.ANSI()
 	}
 	compiler := &Compiler{
-		dialect: target, functionRules: make(map[string]FunctionRule), typedFunctionRules: make(map[string]TypedFunctionRule),
+		aggregateRules: make(map[string]bool),
+		dialect:        target, functionRules: make(map[string]FunctionRule), typedFunctionRules: make(map[string]TypedFunctionRule),
 		operatorRules: make(map[string]OperatorRule), sourceRules: make(map[string]SourceRule),
 	}
 	for _, option := range options {
