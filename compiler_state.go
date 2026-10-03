@@ -11,6 +11,8 @@ import (
 
 type compileState struct {
 	compiler               *Compiler
+	managementAllowed      bool
+	pipelineDepth          int
 	scalarLets             map[string]boundExpr
 	tabularLets            map[string]Relation
 	functions              map[string]*boundFunction
@@ -51,6 +53,8 @@ type relationScope struct {
 }
 
 func (s *compileState) pipeline(pipeline *kql.Pipeline) (result Relation) {
+	s.pipelineDepth++
+	defer func() { s.pipelineDepth-- }()
 	previousAggregation := s.aggregationAllowed
 	s.aggregationAllowed = false
 	defer func() { s.aggregationAllowed = previousAggregation }()

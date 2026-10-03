@@ -71,6 +71,9 @@ func initEntries() {
 			}
 		}
 
+		add("command", "command.", "show.tables show.table.schema", Validated, Equivalent, "read-only catalog-backed metadata with query-result pipelines; requires explicit management catalog; exact service metadata/differential semantics remain open")
+		add("command", "command.", "opaque", Opaque, Unsupported, "requires a management or external-service runtime; opaque preservation is not grammar validation")
+		add("source", "source.", "management", Recognized, Unsupported, "validated table metadata commands require an explicit catalog; other commands require an external command runtime")
 		add("source", "source.", sourceNames, Recognized, Unsupported, "source availability and lowering are target-dependent")
 		add("statement", "statement.", statementNames, Recognized, Unsupported, "session and control-plane statements are not SQL queries")
 		add("operator", "operator.", operatorNames, Recognized, Unsupported, "recognized with a stable unsupported diagnostic")

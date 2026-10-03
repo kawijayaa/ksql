@@ -16,5 +16,10 @@
     "src/Kusto.Language/PlugIns.cs",
     "src/Kusto.Language/Operators.cs",
     "src/Kusto.Language/QueryOperatorParameters.cs"
-  ]
+  ],
+  "command_sources": [
+    "src/Kusto.Language.Generators/EngineCommandInfos.cs",
+    "src/Kusto.Language/Parser/CommandGrammar.cs"
+  ],
+  "command_inventory": "partial: table metadata command families; complete enumeration and grammar remain open"
 }

@@ -76,6 +76,8 @@ The built-in relational compiler currently lowers:
   `distinct`; `extend` replaces existing columns in place
 - exact-name `project-away`, `project-keep`, `project-rename`, and
   `project-reorder`
+- [management commands](docs/management-commands.md), initial read-only catalog
+  metadata and command result pipelines
 - [validated core aggregates](docs/core-aggregates.md), conditional numeric
   aggregates and empty-input defaults (broader aggregate conformance is open)
 - [typed conditionals and coalescing](docs/scalar-semantics.md), numeric branch
@@ -103,8 +105,9 @@ The built-in relational compiler currently lowers:
 - schema-aware literal `search` through an explicit regex capability, plus
   SQLite/PostgreSQL `make_list` with dynamic result metadata
 
-Every operator and built-in registry entry from the pinned Microsoft source is
-recorded by the `features` package. Recognized features that cannot be
+Query operators and scalar/aggregate/plugin registry entries from the pinned
+Microsoft source are recorded by the `features` package. Management inventory
+and complete command grammar remain partial. Recognized features that cannot be
 represented safely in the selected SQL dialect return a source-located stable
 diagnostic. They never become an unchecked SQL function call.
 

@@ -9,6 +9,10 @@ import (
 
 func (s *compileState) source(source kql.Source) Relation {
 	s.use("source."+source.Kind, "equivalent", source.Span)
+	if source.Kind == "management" && (!s.managementAllowed || s.pipelineDepth != 1) {
+		s.bindError("KQLB0250", source.Span, "source.management", "management commands must be standalone top-level commands with optional result pipelines")
+		return Relation{}
+	}
 	if source.Kind == "table" {
 		if bound, ok := s.tabularLets[strings.ToLower(unquoteKQL(source.Name))]; ok {
 			s.captureRows(bound.rowDependencies)
@@ -34,6 +38,8 @@ func (s *compileState) source(source kql.Source) Relation {
 		return relation
 	}
 	switch source.Kind {
+	case "management":
+		return s.managementSource(source)
 	case "table":
 		name := source.Name
 		schema := Schema{Unknown: true}

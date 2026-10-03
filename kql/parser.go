@@ -195,6 +195,9 @@ func flattenPipelineParentheses(tokens []Token) ([]Token, []ParseError) {
 
 func parseSource(tokens []Token) (Source, []ParseError) {
 	source := Source{Kind: "expression", Raw: tokens, Span: tokensSpan(tokens)}
+	if tokens[0].Text == "." {
+		return parseManagement(source, tokens)
+	}
 	if lower(tokens[0]) == "union" {
 		op, errs := parseUnion(Operator{Kind: "union", Span: source.Span}, tokens[1:])
 		spec := op.Body.(UnionSpec)

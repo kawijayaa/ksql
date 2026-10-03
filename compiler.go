@@ -20,6 +20,7 @@ type Compiler struct {
 	catalog            Catalog
 	parameterization   ParameterizationMode
 	limits             Limits
+	management         *ManagementCatalog
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
@@ -92,6 +93,7 @@ func (c *Compiler) Compile(source string) Result {
 				state.error("KQLL0103", node.Span, "statement.expression", "multiple result-producing statements cannot be represented by one SQL query")
 				continue
 			}
+			state.managementAllowed = len(tree.Statements) == 1 && node.Pipeline.Source.Kind == "management" && tree.Tokens[0].Text == "."
 			relation = state.pipeline(node.Pipeline)
 		}
 	}

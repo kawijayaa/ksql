@@ -79,8 +79,10 @@ type Pipeline struct {
 func (p *Pipeline) NodeSpan() Span { return p.Span }
 
 // Source is the left-most pipeline input. Kind is table, print, range,
-// datatable, union, externaldata, inline_external_table, entity_group, or expression.
+// datatable, union, externaldata, inline_external_table, entity_group, management,
+// or expression. Management command headers retain their own typed AST.
 type Source struct {
+	Command *ManagementCommand
 	Union   *UnionSpec
 	Kind    string
 	Name    string
