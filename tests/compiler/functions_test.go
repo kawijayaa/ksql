@@ -112,6 +112,8 @@ func FuzzQueryFunctions(f *testing.F) {
 		`datatable(n:long,s:string)[1,"a",2,"b"]|summarize (last,lastLabel)=arg_max(n,s),arg_min(n,s)`,
 		`datatable(n:long)[1]|summarize (x,y)=arg_max(n,)`,
 		`datatable(n:long)[1]|summarize (a,)=arg_max(n)`,
+		`print n=1,s="x"|summarize (num,label)=take_any(n,s),take_anyif(s,n==1)`,
+		`print n=1|summarize any(*,n),take_anyif(n,1)`,
 		`print x=1 | as hint.materialized=true T | union T`,
 		`materialize(Events | count`,
 		`let f=(x:long){toscalar(materialize(print n=x))}; datatable(x:long)[1]|project f(x)`,

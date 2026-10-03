@@ -67,3 +67,42 @@ Column naming follows Microsoft's
 and [tuple projection binder](https://github.com/microsoft/Kusto-Query-Language/blob/master/src/Kusto.Language/Binder/Binder_Projection.cs)
 for the tested forms. Empty-input semantics are specified by the
 [summarize reference](https://learn.microsoft.com/en-us/kusto/query/summarize-operator?view=microsoft-fabric).
+
+## Arbitrary row selection
+
+`take_any(expr, ...)` returns expressions from one coherent arbitrary input
+record per group. `take_any(*)` returns input columns except group keys;
+explicit columns combined with `*` are not repeated. A single scalar argument
+prefers a present value, excluding null and empty strings when available.
+Multiple arguments share one rank and do not independently minimize columns.
+Each separate selector can choose a different record.
+
+```kql
+Events
+| summarize (sample_time, sample_user) = take_any(TimeGenerated, User),
+            matching_user = take_anyif(User, Source == "audit"),
+            events = count()
+  by Host
+```
+
+`take_anyif(expr, predicate)` accepts a known Boolean predicate, ranks true
+records first, and prefers non-null/non-empty eligible values. False or null
+predicates cannot contribute a selected value. With no eligible records it
+returns null without removing the group or changing sibling aggregates.
+Deprecated `any` and `anyif` retain `any_` and `anyif_` result prefixes;
+`any` accepts either scalar arguments or a single wildcard. Tuple assignments,
+Boolean/dynamic payloads, caches, function composition, and both parameter
+modes use the same row-selection infrastructure. Unknown payload types and
+zero-column wildcard expansion return diagnostics. Explicit function mappings
+retain precedence. There is no promise of randomness or a stable representative.
+
+SQLite execution tests exercise coherence, presence, predicates, empty groups,
+resource limits, output naming/types and one evaluation per input expression.
+PostgreSQL rendering is checked, but execution and Kusto differential tests
+remain open. Tagged dynamic null/string values and complete naming/case rules
+remain subject to the type-model limitations above. The known-schema,
+materialization/dialect and resource policies apply to these selectors too.
+
+References: [take_any](https://learn.microsoft.com/en-us/kusto/query/take-any-aggregation-function),
+[take_anyif](https://learn.microsoft.com/en-us/kusto/query/take-anyif-aggregation-function),
+and the pinned Microsoft aggregate catalog (notably `anyif_` naming).

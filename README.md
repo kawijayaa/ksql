@@ -78,6 +78,8 @@ The built-in relational compiler currently lowers:
   `project-reorder`
 - schema-bound [`arg_max`/`arg_min`](docs/row-selection.md), wildcard/tuple output,
   null-aware row selection, and sibling aggregates
+- coherent `take_any` / `take_anyif` and deprecated aliases, with tuple/wildcard
+  results, presence preference and conditional eligibility
 - `count`, `sort`/`order`, `take`/`limit`, and `top`
 - `sample`, `sample-distinct`, and reusable pipeline aliases with `as`
 - `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`

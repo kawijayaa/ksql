@@ -192,7 +192,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	case "dcount":
 		s.error("KQLL0510", value.Span, "aggregate.dcount", "dcount is approximate in KQL and requires an explicit compatible aggregate mapping")
 		return boundExpr{}
-	case "arg_min", "arg_max", "argmin", "argmax":
+	case "arg_min", "arg_max", "argmin", "argmax", "take_any", "any", "take_anyif", "anyif":
 		s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
 		return boundExpr{}
 	case "sum", "avg", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":

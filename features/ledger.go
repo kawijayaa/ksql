@@ -302,6 +302,7 @@ function.pow function.sqrt function.exp function.log function.log10 function.sin
 function.cos function.tan function.asin function.acos function.atan
 function.atan2 function.sign function.tostring
 aggregate.count aggregate.sum aggregate.sumif aggregate.countif aggregate.avg
+aggregate.any aggregate.take_any aggregate.anyif aggregate.take_anyif
 aggregate.min aggregate.max aggregate.arg_min aggregate.arg_max aggregate.argmin aggregate.argmax
 `
 

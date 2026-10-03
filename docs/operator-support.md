@@ -28,6 +28,7 @@ positioned diagnostic and no partial SQL.
 | `parse`, `parse-where`, `parse-kv` | Yes | Opaque | No | No | None | Unsupported; no unchecked UDF lowering |
 | `evaluate bag_unpack` | Yes | Opaque | No | No | None | Unsupported; schema declaration is not yet typed |
 | `dcount` | Yes | Call expression | Diagnostic | No default | None | Approximate KQL semantics require an explicit compatible mapping |
+| `take_any`, `any`, `take_anyif`, `anyif` | Yes | Call/tuple assignment | Bound schema | Materialized inputs, per-call rank | SQLite; PostgreSQL rendering | Coherent arbitrary record, presence preference for single expressions, conditional eligibility, independent sibling aggregates |
 | `arg_min`, `arg_max`, `argmin`, `argmax` | Yes | Call/tuple assignment | Bound schema | Materialized inputs, per-call rank, selected-value aggregation | SQLite; PostgreSQL rendering | Coherent row per selector, null keys last, independent sibling aggregates; see row-selection guide |
 
 ## SQLite details

@@ -32,7 +32,7 @@ func (s *compileState) rowSelectionCall(expression kql.Expression) (*kql.CallExp
 		return nil, "", ""
 	}
 	function := strings.ToLower(unquoteKQL(name.Name))
-	if function != "arg_max" && function != "arg_min" && function != "argmax" && function != "argmin" {
+	if function != "arg_max" && function != "arg_min" && function != "argmax" && function != "argmin" && function != "take_any" && function != "any" && function != "take_anyif" && function != "anyif" {
 		return nil, "", ""
 	}
 	if s.functions[function] != nil || s.compiler.functionRules[function] != nil || s.compiler.typedFunctionRules[function] != nil {
@@ -51,9 +51,8 @@ func (s *compileState) hasRowSelection(expressions []kql.Expression) bool {
 }
 
 type rowSelection struct {
-	primary   string
-	rank      string
-	direction string
+	rank    string
+	orderBy []sqlast.Order
 }
 
 func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, operator kql.Operator) Relation {
@@ -145,8 +144,7 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 			aliases = []string{alias}
 		}
 		startColumn := len(output.Columns)
-		assignName := func(name string) string {
-			index := len(output.Columns) - startColumn
+		assignName := func(name string, index int) string {
 			if index < len(aliases) {
 				name = unquoteKQL(aliases[index])
 			} else {
@@ -156,6 +154,16 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 			return name
 		}
 		s.use("aggregate."+function, "equivalent", call.Span)
+		if function == "take_any" || function == "any" || function == "take_anyif" || function == "anyif" {
+			items, columns, selection := s.takeAnySelection(call, function, input.Schema, byColumns, prepare, assignName, internalName)
+			projections = append(projections, items...)
+			output.Columns = append(output.Columns, columns...)
+			if len(aliases) > len(columns) {
+				s.bindError("KQLB0353", expression.NodeSpan(), "aggregate."+function, "tuple assignment has more names than aggregate result columns")
+			}
+			selections = append(selections, selection)
+			continue
+		}
 		if len(call.Args) == 0 || len(call.Args) > 128 {
 			s.bindError("KQLB0351", call.Span, "aggregate."+function, "row-selection aggregate requires 1 to 128 scalar or wildcard arguments")
 			continue
@@ -193,7 +201,7 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 					if legacy {
 						name = prefix + "_" + primaryName + "_" + name
 					}
-					name = assignName(name)
+					name = assignName(name, len(output.Columns)-startColumn)
 					projections = append(projections, sqlast.SelectItem{Expr: &sqlast.RankedValue{Value: &sqlast.Identifier{Parts: []string{column.Name}}, Rank: &sqlast.Identifier{Parts: []string{rank}}}, Alias: name})
 					output.Columns = append(output.Columns, Column{Name: name, Type: column.Type})
 					if !s.checkProjectionWidth(len(output.Columns), arg.NodeSpan(), feature) {
@@ -252,7 +260,7 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 					name = prefix + "_" + primaryName + "_" + name
 				}
 			}
-			name = assignName(name)
+			name = assignName(name, len(output.Columns)-startColumn)
 			preparedName := prepare(value)
 			if i == 0 {
 				primaryColumnName = preparedName
@@ -267,7 +275,8 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 			s.bindError("KQLB0353", expression.NodeSpan(), "aggregate."+function, "tuple assignment has more names than aggregate result columns")
 		}
 		if primary.SQL != nil && primaryColumnName != "" {
-			selections = append(selections, rowSelection{primary: primaryColumnName, rank: rank, direction: direction})
+			key := &sqlast.Identifier{Parts: []string{primaryColumnName}}
+			selections = append(selections, rowSelection{rank: rank, orderBy: []sqlast.Order{{Expr: missingValueRank(key, primary.Type, false), Direction: "ASC"}, {Expr: key, Direction: direction}}})
 		}
 	}
 	if !s.checkProjectionWidth(len(output.Columns), operator.Span, feature) || !s.validateUnique(output.Columns, operator.Span, feature) || len(s.diagnostics) != before {
@@ -285,9 +294,7 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 	}
 	rankedItems := []sqlast.SelectItem{{Expr: &sqlast.Star{}}}
 	for _, selection := range selections {
-		primary := &sqlast.Identifier{Parts: []string{selection.primary}}
-		nullRank := &sqlast.Case{Branches: []sqlast.When{{Condition: &sqlast.Binary{Left: primary, Operator: "IS", Right: &sqlast.Literal{Kind: sqlast.NullLiteral}}, Result: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}
-		rankedItems = append(rankedItems, sqlast.SelectItem{Expr: &sqlast.Window{Expr: &sqlast.Call{Name: "row_number"}, PartitionBy: groups, OrderBy: []sqlast.Order{{Expr: nullRank, Direction: "ASC"}, {Expr: primary, Direction: selection.direction}}}, Alias: selection.rank})
+		rankedItems = append(rankedItems, sqlast.SelectItem{Expr: &sqlast.Window{Expr: &sqlast.Call{Name: "row_number"}, PartitionBy: groups, OrderBy: selection.orderBy}, Alias: selection.rank})
 	}
 	ranked := &sqlast.Select{From: &sqlast.Subquery{Query: prepared.Query, Alias: s.nextAlias()}, Projections: rankedItems}
 	return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: ranked, Alias: s.nextAlias()}, Projections: projections, GroupBy: groups}, Schema: output}
