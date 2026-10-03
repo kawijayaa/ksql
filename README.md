@@ -76,6 +76,8 @@ The built-in relational compiler currently lowers:
   `distinct`; `extend` replaces existing columns in place
 - exact-name `project-away`, `project-keep`, `project-rename`, and
   `project-reorder`
+- [validated core aggregates](docs/core-aggregates.md), conditional numeric
+  aggregates and empty-input defaults (broader aggregate conformance is open)
 - [typed conditionals and coalescing](docs/scalar-semantics.md), numeric branch
   promotion, Boolean literal metadata, and bounded scalar argument policies
 - schema-bound [`arg_max`/`arg_min`](docs/row-selection.md), wildcard/tuple output,

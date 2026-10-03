@@ -47,6 +47,18 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		// Reject bounded built-ins before expanding their arguments. Explicit
 		// extensions keep precedence and their own signature policies.
 		n := len(value.Args)
+		if isCoreAggregate(function) {
+			if !s.aggregationAllowed {
+				s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
+				return boundExpr{}
+			}
+			if !s.aggregateArity(value, function) {
+				return boundExpr{}
+			}
+			// Aggregate arguments are row expressions; nested aggregates are invalid.
+			s.aggregationAllowed = false
+			defer func() { s.aggregationAllowed = true }()
+		}
 		switch function {
 		case "coalesce":
 			if n < 2 || n > 64 {
@@ -232,21 +244,8 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		return boundExpr{SQL: &sqlast.Call{Name: "upper", Args: args}, Type: TypeString}
 	case "substring":
 		return boundExpr{SQL: &sqlast.Call{Name: "substr", Args: args}, Type: TypeString}
-	case "countif":
-		if len(args) != 1 {
-			return s.arity(value, function, 1)
-		}
-		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[0], Result: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: TypeLong}
-	case "sumif":
-		if len(args) != 2 {
-			return s.arity(value, function, 2)
-		}
-		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[1], Result: args[0]}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: functionType(function, argTypes)}
-	case "count":
-		if len(args) == 0 {
-			args = []sqlast.Expr{&sqlast.Star{}}
-		}
-		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: TypeLong}
+	case "count", "countif", "sum", "sumif", "avg", "avgif", "min", "minif", "max", "maxif":
+		return s.coreAggregate(value, function, args, argTypes)
 	case "make_list":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
@@ -266,7 +265,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	case "arg_min", "arg_max", "argmin", "argmax", "take_any", "any", "take_anyif", "anyif":
 		s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
 		return boundExpr{}
-	case "sum", "avg", "min", "max", "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
+	case "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
 		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: functionType(function, argTypes)}
 	default:
 		s.error("KQLL0503", value.Span, "function."+function, "function "+function+" is recognized syntactically but has no safe SQL mapping")
@@ -285,7 +284,7 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		return TypeInt
 	case "long", "int64", "tolong", "strlen", "count", "countif":
 		return TypeLong
-	case "real", "double", "decimal", "toreal", "todouble", "todecimal", "avg":
+	case "real", "double", "decimal", "toreal", "todouble", "todecimal", "avg", "avgif":
 		return TypeReal
 	case "tostring", "strcat", "tolower", "toupper", "substring", "toguid":
 		return TypeString
@@ -303,7 +302,7 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 			return TypeLong
 		}
 		switch function {
-		case "sum", "sumif", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "sign":
+		case "sum", "sumif", "min", "minif", "max", "maxif", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "sign":
 			return arguments[0]
 		}
 	}

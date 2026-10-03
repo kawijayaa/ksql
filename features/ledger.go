@@ -99,6 +99,7 @@ func initEntries() {
 		}
 
 		setSupport(coreEquivalent, Validated, Equivalent, "lowered through the dialect-neutral SQL AST")
+		setSupport("aggregate.count aggregate.countif aggregate.sum aggregate.sumif aggregate.avg aggregate.avgif aggregate.min aggregate.minif aggregate.max aggregate.maxif", Validated, Equivalent, "validated core aggregate signatures and contexts; numeric conditional execution and empty defaults tested on SQLite; temporal/decimal overloads, ordering and engine differential conformance remain incomplete; see docs/core-aggregates.md")
 		setSupport("operator.invoke", Validated, Equivalent, "named query functions with a first tabular parameter; inline functions and stored functions remain unsupported")
 		setSupport("function.iif function.iff function.case function.coalesce", Validated, Equivalent, "represented common types and bounded signatures; dynamic string conversion, full tags and differential behavior remain incomplete; see docs/scalar-semantics.md")
 		setSupport(coreLossy, Validated, Lossy, "translation has a documented KQL/SQL semantic difference")
@@ -304,7 +305,7 @@ function.cos function.tan function.asin function.acos function.atan
 function.atan2 function.sign function.tostring
 aggregate.count aggregate.sum aggregate.sumif aggregate.countif aggregate.avg
 aggregate.any aggregate.take_any aggregate.anyif aggregate.take_anyif
-aggregate.min aggregate.max aggregate.arg_min aggregate.arg_max aggregate.argmin aggregate.argmax
+aggregate.min aggregate.minif aggregate.max aggregate.maxif aggregate.avgif aggregate.arg_min aggregate.arg_max aggregate.argmin aggregate.argmax
 `
 
 const coreLossy = `

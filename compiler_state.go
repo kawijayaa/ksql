@@ -14,6 +14,7 @@ type compileState struct {
 	scalarLets             map[string]boundExpr
 	tabularLets            map[string]Relation
 	functions              map[string]*boundFunction
+	aggregationAllowed     bool
 	functionDepth          int
 	functionValidation     bool
 	functionWork           int
@@ -49,6 +50,9 @@ type relationScope struct {
 }
 
 func (s *compileState) pipeline(pipeline *kql.Pipeline) (result Relation) {
+	previousAggregation := s.aggregationAllowed
+	s.aggregationAllowed = false
+	defer func() { s.aggregationAllowed = previousAggregation }()
 	previousRow, previousCaptures := s.rowID, s.capturedRows
 	s.nextRowID++
 	s.rowID, s.capturedRows = s.nextRowID, nil

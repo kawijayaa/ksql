@@ -82,7 +82,7 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		if !s.checkNonDynamicColumns(groupSchema.Columns, spanOfExpressions(spec.By), feature) {
 			return Relation{}
 		}
-		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema, false)
+		aggregateItems, aggregateSchema := s.aggregateItems(spec.Aggregates, input.Schema)
 		groupSchema.Columns = append(groupSchema.Columns, aggregateSchema.Columns...)
 		if !s.checkProjectionWidth(len(groupSchema.Columns), operator.Span, feature) {
 			return Relation{}

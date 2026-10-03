@@ -129,7 +129,7 @@ func (s *compileState) summarizeRows(input Relation, spec kql.SummarizeSpec, ope
 	for _, expression := range spec.Aggregates {
 		call, function, alias := s.rowSelectionCall(expression)
 		if call == nil {
-			items, schema := s.projectItems([]kql.Expression{expression}, true, input.Schema, false)
+			items, schema := s.aggregateItems([]kql.Expression{expression}, input.Schema)
 			projections = append(projections, items...)
 			output.Columns = append(output.Columns, schema.Columns...)
 			for _, column := range schema.Columns {
