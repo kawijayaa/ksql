@@ -19,7 +19,9 @@ func TestDefaultResultNames(t *testing.T) {
 			`t,count_,sum_a,avg_a,min_a,max_a,countif_,sumif_a,list_a`},
 		{`datatable(a:long)[1] | summarize sum(a * 2), count()`, `sum_,count_`},
 		{`datatable(s:string)["a"] | extend tolower(s), strlen(s), tostring(s), iff(true, 1, 2), toupper(s)`, `s,Column1,strlen_s,Column2,Column3`},
-		{`datatable(s:string)["a"] | project strlen(s), bin(strlen(s), 1)`, `strlen_s,Column1`},
+		// project keeps generated ColumnN names for unnamed calls; inferring
+		// them needs Kusto's numeric suffixes for colliding inferred names.
+		{`datatable(s:string)["a"] | project strlen(s), bin(strlen(s), 1)`, `Column1,Column2`},
 	} {
 		result := compiler.Compile(tc.query)
 		if !result.OK() {
