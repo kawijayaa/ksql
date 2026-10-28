@@ -6,6 +6,7 @@ type sqlite struct {
 	regexFunction            string
 	regexCapturesFunction    string
 	keyValuesFunction        string
+	scalarTextFunction       string
 	datetimeAddFunction      string
 	datetimeDiffFunction     string
 	regexCaseInsensitiveFlag string
@@ -43,6 +44,18 @@ func WithKeyValuesFunction(name string) SQLiteOption {
 	return func(d *sqlite) {
 		if validFunctionName(name) {
 			d.keyValuesFunction = name
+		}
+	}
+}
+
+// WithScalarTextFunction configures a one-argument UDF that converts a
+// non-string scalar to Kusto's text form (reals as shortest round-trip
+// digits), used by tostring and strcat instead of a VARCHAR cast. Invalid
+// identifiers are ignored.
+func WithScalarTextFunction(name string) SQLiteOption {
+	return func(d *sqlite) {
+		if validFunctionName(name) {
+			d.scalarTextFunction = name
 		}
 	}
 }
@@ -160,6 +173,12 @@ func (sqlite) TimespanText(value string) (string, bool) {
 		"printf('%02d:%02d:%02d', (abs(ksql_span.t) / 36000000000) % 24, (abs(ksql_span.t) / 600000000) % 60, (abs(ksql_span.t) / 10000000) % 60) || " +
 		"(CASE WHEN abs(ksql_span.t) % 10000000 <> 0 THEN printf('.%07d', abs(ksql_span.t) % 10000000) ELSE '' END) END " +
 		"FROM (SELECT " + value + " AS t) AS ksql_span)", true
+}
+func (d sqlite) ScalarText(value string) (string, bool) {
+	if d.scalarTextFunction == "" {
+		return "", false
+	}
+	return d.scalarTextFunction + "(" + value + ")", true
 }
 func (d sqlite) KeyValues(value, options string) (string, bool) {
 	if d.keyValuesFunction == "" {

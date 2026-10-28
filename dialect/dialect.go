@@ -702,6 +702,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no datetime arithmetic", r.dialect.Name())
+	case *sqlast.ScalarText:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			ScalarText(value string) (string, bool)
+		}); ok {
+			if result, supported := capability.ScalarText(value); supported {
+				return result, nil
+			}
+		}
+		return "CAST(" + value + " AS VARCHAR)", nil
 	case *sqlast.TimespanText:
 		value, err := r.expr(e.Value)
 		if err != nil {

@@ -398,7 +398,7 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 // textOf converts a value as KQL tostring does: Booleans are true/false,
 // timespans use [-][d.]hh:mm:ss[.fffffff], and null becomes an empty string.
 func textOf(value sqlast.Expr, kind ScalarType) sqlast.Expr {
-	text := sqlast.Expr(&sqlast.Cast{Expr: value, Type: "VARCHAR"})
+	text := sqlast.Expr(&sqlast.ScalarText{Value: value})
 	switch kind {
 	case TypeString:
 		text = value

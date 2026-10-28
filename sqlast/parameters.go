@@ -85,6 +85,8 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			value.Left, value.Right = expression(value.Left), expression(value.Right)
 		case *TimespanText:
 			value.Value = expression(value.Value)
+		case *ScalarText:
+			value.Value = expression(value.Value)
 		case *StringMatch:
 			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
 		case *KeyValues:

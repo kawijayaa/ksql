@@ -230,6 +230,10 @@ type DatetimeDiff struct{ Left, Right Expr }
 // TimespanText formats ticks as [-][d.]hh:mm:ss[.fffffff].
 type TimespanText struct{ Value Expr }
 
+// ScalarText converts a non-string scalar to text. Dialects may format reals
+// as Kusto does (shortest round-trip digits); otherwise it is a VARCHAR cast.
+type ScalarText struct{ Value Expr }
+
 // StringMatch tests whether Value contains, starts with or ends with Pattern
 // literally (Mode "contains", "startswith" or "endswith").
 type StringMatch struct {
@@ -291,6 +295,7 @@ func (*StringMatch) exprNode()      {}
 func (*DatetimeAdd) exprNode()      {}
 func (*DatetimeDiff) exprNode()     {}
 func (*TimespanText) exprNode()     {}
+func (*ScalarText) exprNode()       {}
 func (*ArrayContains) exprNode()    {}
 func (*InSubquery) exprNode()       {}
 func (*ExpansionArray) exprNode()   {}

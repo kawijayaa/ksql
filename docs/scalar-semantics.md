@@ -92,6 +92,13 @@ Sources:
 [tostring()](https://learn.microsoft.com/en-us/kusto/query/tostring-function?view=microsoft-fabric)
 documentation: KQL strings have no null value.
 
+Kusto prints reals with the shortest digits that round-trip, switching to E
+notation for exponents of 15 and above or below -4 (`1E+15`, `1E-05`).
+SQLite's cast uses 17 significant digits, so on SQLite `tostring` and `strcat`
+call the UDF configured by `dialect.WithScalarTextFunction(name)`;
+`runtime.ScalarText` implements it. Without that option values are cast to
+`VARCHAR`.
+
 ## contains, startswith and endswith
 
 These operators compare the search text literally. SQLite lowers them through
