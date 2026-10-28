@@ -119,3 +119,10 @@ such as `tolower` or `iff`, are unnamed, so `extend` generates `ColumnN`.
 `project` still names every unnamed call `ColumnN`; inferring names there
 requires Kusto's numeric suffixes for colliding inferred names, which remain
 open.
+
+## Name resolution
+
+Names are case-sensitive, as in Kusto. An input column spelled exactly like a
+name wins; otherwise a scalar `let` with that name wins, so `let region = ...`
+is not shadowed by a column named `Region`. Column references that differ only
+in case still resolve case-insensitively for compatibility.

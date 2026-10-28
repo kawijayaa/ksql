@@ -66,6 +66,21 @@ func (s *compileState) hasInputName(name string) bool {
 	return found || ambiguous
 }
 
+// hasExactInputName reports an input column spelled exactly like name. KQL
+// names are case-sensitive, so a let named region is not shadowed by a column
+// named Region.
+func (s *compileState) hasExactInputName(name string) bool {
+	if s.aggregationAllowed {
+		return false
+	}
+	for _, column := range s.input.Columns {
+		if column.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *compileState) name(value *kql.NameExpression) boundExpr {
 	logicalName := unquoteKQL(value.Name)
 	parts := []string{logicalName}
@@ -73,7 +88,7 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 		parts = splitName(logicalName)
 	}
 	if len(parts) > 1 {
-		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok && !s.hasInputName(parts[0]) && !s.hasInputName(unquoteKQL(value.Name)) {
+		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok && !s.hasExactInputName(parts[0]) && !s.hasExactInputName(unquoteKQL(value.Name)) {
 			if bound.Type != TypeDynamic && bound.Type != TypeUnknown {
 				s.bindError("KQLB0403", value.Span, "expression.name", parts[0]+" is not dynamic")
 				return boundExpr{}

@@ -37,7 +37,7 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 	}
 	switch value := expression.(type) {
 	case *kql.NameExpression:
-		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok && !s.hasInputName(unquoteKQL(value.Name)) {
+		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok && !s.hasExactInputName(unquoteKQL(value.Name)) {
 			s.captureRows(bound.rows)
 			bound.Name = unquoteKQL(value.Name)
 			return bound

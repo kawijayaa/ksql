@@ -39,3 +39,18 @@ func TestMakeListEncodesElementsAsTyped(t *testing.T) {
 		t.Fatalf("rows = %s; SQL=%s", got, result.SQL)
 	}
 }
+
+// Microsoft's let-statement example: names are case-sensitive, so the scalar
+// let region is not shadowed by the column Region.
+func TestLetNamesAreCaseSensitive(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	result := compiler.Compile(`let threshold = 50; let region = "West"; datatable(Name:string, Score:int, Region:string) ["Alice", 45, "West", "Bob", 60, "East", "Charlie", 55, "West", "Dana", 70, "North"] | where Score > threshold and Region == region | project Name`)
+	if got := fmt.Sprint(queryRows(t, db, result)); got != `[[Charlie]]` {
+		t.Fatalf("rows = %s; SQL=%s", got, result.SQL)
+	}
+	exact := compiler.Compile(`let Region = "East"; datatable(Region:string)["West","East"] | where Region == "West" | count`)
+	if got := fmt.Sprint(queryRows(t, db, exact)); got != `[[1]]` {
+		t.Fatalf("an exact-case column must win over a let: %s", got)
+	}
+}
