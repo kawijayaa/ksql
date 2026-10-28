@@ -150,6 +150,6 @@ missing tables, failing only when none exists.
 
 `set Option [= Value];` statements before a query set request options.
 `query_take_max_records` (or `truncationmaxrecords`) limits the result rows,
-`query_now` fixes `now()`, and `query_bin_auto_size`/`query_bin_auto_at`
+`query_now` fixes `now()` and `ago()`, and `query_bin_auto_size`/`query_bin_auto_at`
 define `bin_auto(x)` as `bin(x, size)` or `bin_at(x, size, at)`. Other options
 tune Kusto's execution; they are accepted with warning `KQLL0104`.

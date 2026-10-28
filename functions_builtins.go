@@ -25,8 +25,8 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
-	if function == "now" {
-		if bound, ok := s.requestNow(value); ok {
+	if function == "now" || function == "ago" {
+		if bound, ok := s.requestNow(value, function == "ago"); ok {
 			return bound
 		}
 	}

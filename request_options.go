@@ -25,15 +25,23 @@ func (s *compileState) setOption(statement *kql.SetStatement) {
 	}
 }
 
-// requestNow returns now([offset]) under set query_now = datetime(...).
-func (s *compileState) requestNow(call *kql.CallExpression) (boundExpr, bool) {
+// requestNow returns now([offset]) or ago(span) under set query_now =
+// datetime(...).
+func (s *compileState) requestNow(call *kql.CallExpression, ago bool) (boundExpr, bool) {
 	now, ok := s.requestOptions["query_now"]
 	if !ok {
 		return boundExpr{}, false
 	}
+	if ago && len(call.Args) != 1 {
+		return s.arity(call, "ago", 1), true
+	}
 	value := now
 	if len(call.Args) == 1 {
-		value = &kql.BinaryExpression{Left: now, Operator: "+", Right: call.Args[0], Span: call.Span}
+		operator := "+"
+		if ago {
+			operator = "-"
+		}
+		value = &kql.BinaryExpression{Left: now, Operator: operator, Right: call.Args[0], Span: call.Span}
 	}
 	bound := s.expression(value)
 	if bound.SQL != nil && bound.Type != TypeDateTime && bound.Type != TypeUnknown {
