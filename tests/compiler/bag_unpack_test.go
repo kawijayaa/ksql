@@ -92,7 +92,7 @@ func TestBagUnpack(t *testing.T) {
 		{`datatable(s:string)["x"] | evaluate bag_unpack(s)`, "KQLB0416"},
 		{`datatable(d:dynamic)[dynamic({"a":1})] | evaluate bag_unpack(nope)`, "KQLB0401"},
 		{`datatable(d:dynamic)[dynamic({"a":1})] | evaluate bag_unpack(d) : (a:widget)`, "KQLB0416"},
-		{`datatable(d:dynamic)[dynamic({"a":1})] | evaluate sequence_detect(d)`, "KQLL0391"},
+		{`datatable(d:dynamic)[dynamic({"a":1})] | evaluate autocluster(d)`, "KQLL0391"},
 		{`print x=1 | evaluate bag_unpack(`, "KQLP0353"},
 	} {
 		if result := compiler.Compile(tc.query); result.OK() || result.Diagnostics[0].Code != tc.code {

@@ -256,3 +256,31 @@ func TestReduceLowering(t *testing.T) {
 		}
 	}
 }
+
+// sequence_detect's output columns and argument validation.
+func TestSequenceDetectLowering(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(dialect.WithDatetimeArithmeticFunctions("test_dt_add", "test_dt_diff")))
+	data := `datatable(T:datetime, E:string, U:string)[datetime(2026-01-01), "a", "u"]`
+	result := compiler.Compile(data + ` | evaluate sequence_detect(T, 1h, 2h, a=(E == "a"), E == "b", U, H=strcat(U, "x"))`)
+	if !result.OK() {
+		t.Fatal(result.Diagnostics)
+	}
+	names := []string{}
+	for _, column := range result.Columns {
+		names = append(names, column.Name)
+	}
+	if got := strings.Join(names, " "); got != "U H a_T Expr2_T Duration" {
+		t.Errorf("columns %s", got)
+	}
+	for _, query := range []string{
+		data + ` | evaluate sequence_detect(T, 1h, 2h)`,
+		data + ` | evaluate sequence_detect(E, 1h, 2h, E == "a")`,
+		data + ` | evaluate sequence_detect(T, 1h, 2h, U)`,
+		data + ` | evaluate sequence_detect(T, 1h, 2h, E == "a", U, E == "b")`,
+		`T | evaluate sequence_detect(T, 1h, 2h, E == "a")`,
+	} {
+		if result := compiler.Compile(query); result.OK() {
+			t.Errorf("%s: want an error", query)
+		}
+	}
+}

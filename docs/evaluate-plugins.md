@@ -21,5 +21,15 @@ Besides `bag_unpack` (see bag-unpack.md), `evaluate` supports:
   rows before (or `RowsAfter` after) a matching row, in serialized order,
   with a sliding `ROWS BETWEEN` window; row counts are constants up to
   1048576.
+- `sequence_detect(Timeline, MaxStepWindow, MaxSpan, Step1, Step2, ..., Dim1, ...)`:
+  every chain of records matching the steps in order, with equal (or both
+  null) dimensions. Each step's time is strictly later than the previous
+  step's, by at most `MaxStepWindow`, and at most `MaxSpan` after the first
+  step. Steps are the leading Boolean arguments and dimensions are the
+  arguments after them. The output has the dimensions, a
+  `<Step>_<Timeline>` column per step (unnamed steps are `Expr<n>`), and
+  `Duration`, ordered by the first step's time. Each step is a filtered
+  self-join, at most 16 steps. Wide windows over dense matches produce
+  many chains, so applications should bound result sizes.
 
 Other plugins report `KQLL0391`.
