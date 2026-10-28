@@ -187,6 +187,15 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// StringMatch tests whether Value contains, starts with or ends with Pattern
+// literally (Mode "contains", "startswith" or "endswith").
+type StringMatch struct {
+	Value         Expr
+	Pattern       Expr
+	Mode          string
+	CaseSensitive bool
+}
+
 // RegexCaptures returns a JSON array of the capture groups of the first
 // match of Pattern in Value (group one at index zero), or null on no match.
 type RegexCaptures struct {
@@ -235,6 +244,7 @@ func (*Index) exprNode()           {}
 func (*Regex) exprNode()           {}
 func (*RegexCaptures) exprNode()   {}
 func (*KeyValues) exprNode()       {}
+func (*StringMatch) exprNode()     {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

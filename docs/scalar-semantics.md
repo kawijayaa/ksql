@@ -91,3 +91,12 @@ Sources:
 `tostring(x)` returns an empty string when `x` is null, following Microsoft's
 [tostring()](https://learn.microsoft.com/en-us/kusto/query/tostring-function?view=microsoft-fabric)
 documentation: KQL strings have no null value.
+
+## contains, startswith and endswith
+
+These operators compare the search text literally. SQLite lowers them through
+`instr`/`substr` and PostgreSQL through `strpos`/`left`/`right`, so `%`, `_`
+and `\` are ordinary characters, and the `_cs` forms are case-sensitive.
+Case-insensitive forms lowercase both operands with the database's `lower`;
+SQLite's `lower` folds only ASCII letters. Other dialects use `LIKE` with
+escaped wildcards and depend on the column collation for case sensitivity.

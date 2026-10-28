@@ -588,6 +588,36 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.StringMatch:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		pattern, err := r.expr(e.Pattern)
+		if err != nil {
+			return "", err
+		}
+		if !e.CaseSensitive {
+			value, pattern = "lower("+value+")", "lower("+pattern+")"
+		}
+		if capability, ok := r.dialect.(interface {
+			StringMatch(value, pattern, mode string) (string, bool)
+		}); ok {
+			if result, supported := capability.StringMatch(value, pattern, e.Mode); supported {
+				return result, nil
+			}
+		}
+		// Escape LIKE wildcards so the pattern is matched literally.
+		escaped := "replace(replace(replace(" + pattern + ", '\\', '\\\\'), '%', '\\%'), '_', '\\_')"
+		switch e.Mode {
+		case "startswith":
+			escaped = "concat(" + escaped + ", '%')"
+		case "endswith":
+			escaped = "concat('%', " + escaped + ")"
+		default:
+			escaped = "concat('%', " + escaped + ", '%')"
+		}
+		return "(" + value + " LIKE " + escaped + " ESCAPE '\\')", nil
 	case *sqlast.KeyValues:
 		value, err := r.expr(e.Value)
 		if err != nil {

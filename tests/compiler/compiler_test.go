@@ -24,7 +24,7 @@ Events
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	want := `SELECT * FROM (SELECT * FROM (SELECT "service" AS "service", COUNT(*) AS "total", AVG("duration") AS "average" FROM (SELECT *, FLOOR("duration") AS "day" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("severity" >= 10) AND (LOWER("message") LIKE LOWER(CONCAT('%', 'error', '%'))))) AS "_k1") AS "_k2" GROUP BY "service") AS "_k3" ORDER BY "total" DESC NULLS LAST) AS "_k4" LIMIT 5`
+	want := `SELECT * FROM (SELECT * FROM (SELECT "service" AS "service", COUNT(*) AS "total", AVG("duration") AS "average" FROM (SELECT *, FLOOR("duration") AS "day" FROM (SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("severity" >= 10) AND (strpos(lower("message"), lower('error')) > 0))) AS "_k1") AS "_k2" GROUP BY "service") AS "_k3" ORDER BY "total" DESC NULLS LAST) AS "_k4" LIMIT 5`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL =\n%s\nwant:\n%s", result.SQL, want)
 	}

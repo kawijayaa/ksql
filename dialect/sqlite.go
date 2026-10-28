@@ -91,6 +91,20 @@ func (d sqlite) RegexCaptures(value, pattern string) (string, bool) {
 	}
 	return d.regexCapturesFunction + "(" + value + ", " + pattern + ")", true
 }
+
+// StringMatch compares bytes exactly; SQLite LIKE is ASCII case-insensitive
+// and would treat % and _ in the search text as wildcards. Each operand is
+// rendered once so anonymous placeholders keep their argument order.
+func (sqlite) StringMatch(value, pattern, mode string) (string, bool) {
+	switch mode {
+	case "startswith":
+		return "(instr(" + value + ", " + pattern + ") = 1)", true
+	case "endswith":
+		return "(SELECT length(ksql_match.v) >= length(ksql_match.p) AND substr(ksql_match.v, length(ksql_match.v) - length(ksql_match.p) + 1) = ksql_match.p " +
+			"FROM (SELECT " + value + " AS v, " + pattern + " AS p) AS ksql_match)", true
+	}
+	return "(instr(" + value + ", " + pattern + ") > 0)", true
+}
 func (d sqlite) KeyValues(value, options string) (string, bool) {
 	if d.keyValuesFunction == "" {
 		return "", false

@@ -210,25 +210,15 @@ func (s *compileState) termBoundaries() (string, string) {
 	return `(^|[^[:alnum:]])`, `([^[:alnum:]]|$)`
 }
 
+// stringMatch compares literally: the search text is never a LIKE pattern,
+// and case-sensitive operators compare exact characters.
 func stringMatch(left, right sqlast.Expr, wildcard string, caseSensitive, negative bool) sqlast.Expr {
-	patternArgs := []sqlast.Expr{}
-	if wildcard == "both" || wildcard == "prefix" {
-		patternArgs = append(patternArgs, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "%"})
-	}
-	patternArgs = append(patternArgs, right)
-	if wildcard == "both" || wildcard == "suffix" {
-		patternArgs = append(patternArgs, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "%"})
-	}
-	pattern := sqlast.Expr(&sqlast.Call{Name: "concat", Args: patternArgs})
-	if !caseSensitive {
-		left = &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left}}
-		pattern = &sqlast.Call{Name: "lower", Args: []sqlast.Expr{pattern}}
-	}
-	op := "LIKE"
+	mode := map[string]string{"both": "contains", "suffix": "startswith", "prefix": "endswith"}[wildcard]
+	result := sqlast.Expr(&sqlast.StringMatch{Value: left, Pattern: right, Mode: mode, CaseSensitive: caseSensitive})
 	if negative {
-		op = "NOT LIKE"
+		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
 	}
-	return &sqlast.Binary{Left: left, Operator: op, Right: pattern}
+	return result
 }
 
 func termMatch(left, right sqlast.Expr, mode string, caseSensitive, negative bool) (sqlast.Expr, bool) {

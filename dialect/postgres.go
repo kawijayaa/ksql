@@ -42,6 +42,17 @@ func (postgres) Series(column, from, to, step, alias string) (string, bool) {
 func (postgres) JSONEach(_, _ string) (string, bool) { return "", false }
 func (postgres) Random() (string, bool)              { return "RANDOM()", true }
 
+// StringMatch compares text exactly rather than as a LIKE pattern.
+func (postgres) StringMatch(value, pattern, mode string) (string, bool) {
+	switch mode {
+	case "startswith":
+		return "(left(" + value + ", length(" + pattern + ")) = " + pattern + ")", true
+	case "endswith":
+		return "(right(" + value + ", length(" + pattern + ")) = " + pattern + ")", true
+	}
+	return "(strpos(" + value + ", " + pattern + ") > 0)", true
+}
+
 // Fence uses OFFSET 0, which PostgreSQL does not pull up into the outer query.
 func (postgres) Fence(sql string, _ bool) string     { return sql + " OFFSET 0" }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
