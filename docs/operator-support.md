@@ -24,8 +24,8 @@ positioned diagnostic and no partial SQL.
 | `lookup` | Yes | `JoinSpec` | Yes | Yes | Renderer tests | Right same-name columns are omitted; size hints are not enforced |
 | `union` (pipeline or standalone) | Yes | `UnionSpec` | Bound schemas | Name/type-aligned `UNION ALL` | SQLite | Outer null padding and type suffixes with collision avoidance; inner intersects name/type pairs; preserves duplicates |
 | `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value, or several in lockstep | SQLite JSON1 | Lossy SQLite casts; several columns expand by index with null padding, bags as single-property bags (or `kind=array` pairs) |
-| `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize` | SQLite JSON1 | Equivalent for documented row-wise subset |
-| `mv-apply` aggregating | Yes | `MvApplySpec` | No | No | None | Unsupported with `KQLL0334` |
+| `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize`, `mv-expand`, `parse`, `sort`, `project*` | SQLite JSON1 | Equivalent |
+| `mv-apply` aggregating | Yes | `MvApplySpec` | Yes | `summarize`, `count`, `distinct`, `take`, `top` per input row | SQLite JSON1 and window functions | Equivalent; input columns are joined back by a hidden row number; other operators report `KQLL0334` |
 | `parse`, `parse-where` | Yes | `ParseSpec` | Bound schema | One anchored RE2 capture array per row, then typed conversions | SQLite with capture UDF | `simple`, `regex` (with `i`/`m`/`s`/`U` flags) and `relaxed` kinds; strict conversion gating; see [parse guide](parse-operator.md) |
 | `render` | Yes | `RenderSpec` | Final schema | Annotation only; rows unchanged | All | Validated `Result.Visualization`; must be last; see [render guide](render-operator.md) |
 | `parse-kv` | Yes | `ParseKVSpec` | Bound schema | One key-value extraction per row via `runtime.KeyValuesJSON`, then typed conversions | SQLite with registered function | Delimited, free and regex modes with quotes, escapes and greedy values; see [parse-kv guide](parse-kv-operator.md) |
@@ -71,7 +71,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 ## Known gaps
 
 - Column-selection patterns are supported by `project-away`, `project-keep`, and `project-reorder`. Zero-column outputs remain unsupported; exact-name binding remains case-insensitive. Numeric sorting is verified for ASCII digit runs; Unicode digit collation still needs conformance coverage.
-- Schema-declared `bag_unpack` and aggregating `mv-apply` are unsupported.
+- Schema-declared `bag_unpack` is unsupported; aggregating `mv-apply` needs a bound input schema (`KQLB0339`).
 - Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string; those distinctions remain pending.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
 - `MaxInputRowsPerStage` is reserved until supported operators can enforce it

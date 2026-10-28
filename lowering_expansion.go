@@ -13,24 +13,172 @@ func (s *compileState) mvExpand(input Relation, spec kql.MvExpandSpec, operator 
 	return s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, spec.Kind, operator)
 }
 
+// applyRowColumn numbers mv-apply's input rows so subquery operators that
+// combine rows (summarize, take, top, distinct, count) work per input row.
+const applyRowColumn = "__ksql_apply_row"
+
+func applyRowWise(kind string) bool {
+	switch kind {
+	case "where", "extend", "serialize", "mv-expand", "parse", "parse-where", "sort", "project-rename", "project-reorder", "project-away":
+		return true
+	}
+	return false
+}
+
+// mvApply expands its arrays and runs the subquery on each input row's
+// expansion. Row-wise operators apply directly; operators that combine rows
+// are scoped to the input row through a hidden row number, and the input's
+// other columns are joined back to their results.
 func (s *compileState) mvApply(input Relation, spec kql.MvApplySpec, operator kql.Operator) Relation {
-	relation := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, "bag", operator)
-	if relation.Query == nil {
+	rowWise := true
+	for _, inner := range spec.Operators {
+		rowWise = rowWise && applyRowWise(inner.Kind)
+	}
+	if rowWise {
+		relation := s.expandJSON(input, spec.Items, spec.ItemIndex, spec.Limit, "bag", operator)
+		for _, inner := range spec.Operators {
+			if relation.Query == nil {
+				return Relation{}
+			}
+			relation = s.operator(relation, inner)
+		}
+		return relation
+	}
+	feature := "operator.mv-apply"
+	if input.Schema.Unknown {
+		s.bindError("KQLB0339", operator.Span, feature, "mv-apply with summarize, take or top requires a bound input schema")
 		return Relation{}
 	}
+	numberedSchema := input.Schema.Clone()
+	numberedSchema.Columns = append(numberedSchema.Columns, Column{Name: applyRowColumn, Type: TypeLong})
+	numbered := Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}, Projections: []sqlast.SelectItem{
+		{Expr: &sqlast.Star{}},
+		{Expr: &sqlast.Window{Expr: &sqlast.Call{Name: "row_number"}}, Alias: applyRowColumn},
+	}}, Schema: numberedSchema, rowDependencies: input.rowDependencies}
+	relation := s.expandJSON(numbered, spec.Items, spec.ItemIndex, spec.Limit, "bag", operator)
+	row := &kql.NameExpression{Name: applyRowColumn, Span: operator.Span}
+	grouped := false
 	for _, inner := range spec.Operators {
-		switch inner.Kind {
-		case "where", "extend", "serialize":
-			relation = s.operator(relation, inner)
-		default:
-			s.error("KQLL0334", inner.Span, "operator.mv-apply."+inner.Kind, "SQLite mv-apply currently supports where, extend, and serialize subqueries")
-			return Relation{}
-		}
 		if relation.Query == nil {
 			return Relation{}
 		}
+		switch inner.Kind {
+		case "project", "project-keep":
+			body := inner.Body.(kql.ExpressionSpec)
+			body.Expressions = append(append([]kql.Expression{}, body.Expressions...), row)
+			inner.Body = body
+			relation = s.operator(relation, inner)
+		case "summarize":
+			body := inner.Body.(kql.SummarizeSpec)
+			body.By = append([]kql.Expression{row}, body.By...)
+			inner.Body = body
+			relation, grouped = s.operator(relation, inner), true
+		case "count":
+			count := &kql.CallExpression{Function: &kql.NameExpression{Name: "count"}, Span: inner.Span}
+			inner = kql.Operator{Kind: "summarize", Body: kql.SummarizeSpec{Aggregates: []kql.Expression{&kql.NamedExpression{Name: "Count", Value: count}}, By: []kql.Expression{row}}, Span: inner.Span}
+			relation, grouped = s.operator(relation, inner), true
+		case "distinct":
+			body := inner.Body.(kql.ExpressionSpec)
+			body.Expressions = append([]kql.Expression{row}, body.Expressions...)
+			inner.Body = body
+			relation, grouped = s.operator(relation, inner), true
+		case "take", "limit":
+			body := inner.Body.(kql.ExpressionSpec)
+			relation = s.applyRowsPerInput(relation, nil, body.Expressions[0], inner)
+		case "top":
+			body := inner.Body.(kql.TopSpec)
+			relation = s.applyRowsPerInput(relation, []kql.OrderedExpression{body.By}, body.Count, inner)
+		default:
+			if !applyRowWise(inner.Kind) {
+				s.error("KQLL0334", inner.Span, "operator.mv-apply."+inner.Kind, "mv-apply does not support "+inner.Kind+" in its subquery")
+				return Relation{}
+			}
+			relation = s.operator(relation, inner)
+		}
 	}
-	return relation
+	if relation.Query == nil {
+		return Relation{}
+	}
+	if !grouped {
+		return dropColumn(relation, applyRowColumn, s.nextAlias())
+	}
+	// Join the input's columns (except the expanded names and names the
+	// subquery produces) back to the per-row results.
+	expanded := map[string]bool{}
+	for _, item := range spec.Items {
+		expanded[strings.ToLower(item.Name)] = true
+	}
+	left, right := s.nextAlias(), s.nextAlias()
+	var projections []sqlast.SelectItem
+	schema := Schema{}
+	for _, column := range input.Schema.Columns {
+		if _, _, produced, _ := relation.Schema.Lookup(column.Name); produced || expanded[strings.ToLower(column.Name)] {
+			continue
+		}
+		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{left, column.Name}}, Alias: column.Name})
+		schema.Columns = append(schema.Columns, column)
+	}
+	for _, column := range relation.Schema.Columns {
+		if column.Name == applyRowColumn {
+			continue
+		}
+		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{right, column.Name}}, Alias: column.Name})
+		schema.Columns = append(schema.Columns, column)
+	}
+	join := &sqlast.Join{
+		Left:  &sqlast.Subquery{Query: numbered.Query, Alias: left},
+		Right: &sqlast.Subquery{Query: relation.Query, Alias: right},
+		Kind:  "INNER",
+		On:    &sqlast.Binary{Left: &sqlast.Identifier{Parts: []string{left, applyRowColumn}}, Operator: "=", Right: &sqlast.Identifier{Parts: []string{right, applyRowColumn}}},
+	}
+	return Relation{Query: &sqlast.Select{From: join, Projections: projections}, Schema: schema}
+}
+
+// applyRowsPerInput keeps the first count rows of each input row's group,
+// in the given order (take has none).
+func (s *compileState) applyRowsPerInput(relation Relation, orders []kql.OrderedExpression, count kql.Expression, operator kql.Operator) Relation {
+	if !s.validateLimit(count, operator) {
+		return Relation{}
+	}
+	previous := s.input
+	s.input = relation.Schema
+	defer func() { s.input = previous }()
+	var sqlOrders []sqlast.Order
+	for _, order := range orders {
+		bound := s.expression(order.Expression)
+		if bound.SQL == nil {
+			return Relation{}
+		}
+		sqlOrders = append(sqlOrders, sqlast.Order{Expr: bound.SQL, Direction: order.Direction, Nulls: order.Nulls})
+	}
+	limit := s.expression(count)
+	if limit.SQL == nil {
+		return Relation{}
+	}
+	const rank = "__ksql_apply_rank"
+	ranked := &sqlast.Select{From: &sqlast.Subquery{Query: relation.Query, Alias: s.nextAlias()}, Projections: []sqlast.SelectItem{
+		{Expr: &sqlast.Star{}},
+		{Expr: &sqlast.Window{Expr: &sqlast.Call{Name: "row_number"}, PartitionBy: []sqlast.Expr{&sqlast.Identifier{Parts: []string{applyRowColumn}}}, OrderBy: sqlOrders}, Alias: rank},
+	}}
+	projections := make([]sqlast.SelectItem, len(relation.Schema.Columns))
+	for i, column := range relation.Schema.Columns {
+		projections[i] = sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name}
+	}
+	where := &sqlast.Binary{Left: &sqlast.Identifier{Parts: []string{rank}}, Operator: "<=", Right: limit.SQL}
+	return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: ranked, Alias: s.nextAlias()}, Where: where, Projections: projections}, Schema: relation.Schema.Clone()}
+}
+
+func dropColumn(relation Relation, name, alias string) Relation {
+	schema := Schema{}
+	var projections []sqlast.SelectItem
+	for _, column := range relation.Schema.Columns {
+		if column.Name == name {
+			continue
+		}
+		schema.Columns = append(schema.Columns, column)
+		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name})
+	}
+	return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: relation.Query, Alias: alias}, Projections: projections}, Schema: schema}
 }
 
 func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemIndex string, limit kql.Expression, expansionKind string, operator kql.Operator) Relation {

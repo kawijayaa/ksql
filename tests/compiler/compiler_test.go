@@ -177,9 +177,11 @@ func TestCompileMvExpandRequiresReplacementSchema(t *testing.T) {
 	}
 }
 
-func TestCompileMvApplyRejectsNonRowwiseSubquery(t *testing.T) {
+// Per-row mv-apply subqueries (top, take, summarize) need the input schema
+// to join the input's columns back.
+func TestCompileMvApplyPerRowNeedsSchema(t *testing.T) {
 	result := ksql.New(dialect.SQLite()).Compile(`Events | mv-apply item=Items on (top 2 by item)`)
-	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0334" {
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLB0339" {
 		t.Fatalf("Compile() = %#v", result)
 	}
 }
