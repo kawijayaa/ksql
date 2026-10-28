@@ -28,6 +28,9 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "column_names_of" {
 		return s.columnNamesOf(value)
 	}
+	if function == "pack_all" {
+		return s.packAll(value)
+	}
 	if function == "string" || function == "guid" {
 		// string(null) and guid(null) are typed null literals.
 		if len(value.Args) == 1 {

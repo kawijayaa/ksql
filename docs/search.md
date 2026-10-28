@@ -53,3 +53,10 @@ concatenating them:
 `pack_` is built with the application's `bag_pack` (and `bag_merge` for more
 than 32 columns); without them only `project` lists work. Columns appearing
 with several types are not split into typed columns as in Kusto.
+
+## pack_all
+
+`pack_all([ignore_null_empty])` packs the input columns into a bag with the
+application's `bag_pack`. With `ignore_null_empty=true`, null columns (and
+empty strings) are left out, merging per-column bags with `bag_merge`. The
+argument must be a constant Boolean.

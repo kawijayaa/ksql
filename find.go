@@ -242,3 +242,63 @@ func (s *compileState) findPack(own Schema, outputs []Column) (sqlast.Expr, bool
 	bound := s.expression(bag)
 	return bound.SQL, bound.SQL != nil
 }
+
+// packAll lowers pack_all([ignore_null_empty]) to the application's bag_pack
+// over the input columns. With ignore_null_empty, each column contributes
+// an empty bag when it is null (or an empty string), merged with bag_merge.
+func (s *compileState) packAll(call *kql.CallExpression) boundExpr {
+	if len(call.Args) > 1 {
+		return s.arity(call, "pack_all", 1)
+	}
+	ignore := false
+	if len(call.Args) == 1 {
+		literal, ok := call.Args[0].(*kql.LiteralExpression)
+		if !ok || (!strings.EqualFold(literal.Text, "true") && !strings.EqualFold(literal.Text, "false")) {
+			s.bindError("KQLB0413", call.Span, "function.pack_all", "pack_all takes a constant Boolean")
+			return boundExpr{}
+		}
+		ignore = strings.EqualFold(literal.Text, "true")
+	}
+	if s.input.Unknown || len(s.input.Columns) == 0 {
+		s.bindError("KQLB0512", call.Span, "function.pack_all", "pack_all requires a known non-empty input schema")
+		return boundExpr{}
+	}
+	if !ignore {
+		bag, ok := s.findPack(s.input, nil)
+		if !ok {
+			return boundExpr{}
+		}
+		return boundExpr{SQL: bag, Type: TypeDynamic}
+	}
+	empty := &kql.DynamicExpression{Tokens: []kql.Token{{Kind: kql.PunctuationToken, Text: "{"}, {Kind: kql.PunctuationToken, Text: "}"}}}
+	var parts []kql.Expression
+	for _, column := range s.input.Columns {
+		name := &kql.NameExpression{Name: searchName(column.Name)}
+		test := "isnull"
+		if column.Type == TypeString {
+			test = "isempty"
+		}
+		parts = append(parts, &kql.CallExpression{Function: &kql.NameExpression{Name: "iff"}, Args: []kql.Expression{
+			&kql.CallExpression{Function: &kql.NameExpression{Name: test}, Args: []kql.Expression{name}},
+			empty,
+			&kql.CallExpression{Function: &kql.NameExpression{Name: "bag_pack"}, Args: []kql.Expression{searchString(column.Name), name}},
+		}})
+	}
+	for len(parts) > 1 {
+		var merged []kql.Expression
+		for start := 0; start < len(parts); start += findPackChunk {
+			end := min(start+findPackChunk, len(parts))
+			if end-start == 1 {
+				merged = append(merged, parts[start])
+				continue
+			}
+			merged = append(merged, &kql.CallExpression{Function: &kql.NameExpression{Name: "bag_merge"}, Args: parts[start:end]})
+		}
+		parts = merged
+	}
+	bound := s.expression(parts[0])
+	if bound.SQL == nil {
+		return boundExpr{}
+	}
+	return boundExpr{SQL: bound.SQL, Type: TypeDynamic}
+}

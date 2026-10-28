@@ -107,3 +107,17 @@ func TestSQLiteExecFind(t *testing.T) {
 		}
 	}
 }
+
+func TestPackAllNeedsBagFunctions(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()))
+	for _, tc := range []struct{ query, code string }{
+		{`UAL | extend p = pack_all()`, "KQLL0503"},
+		{`UAL | extend p = pack_all(User)`, "KQLB0413"},
+		{`UAL | extend p = pack_all(true, false)`, "KQLB0501"},
+	} {
+		result := compiler.Compile(tc.query)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {
+			t.Fatalf("%s: diagnostics %v want %s", tc.query, result.Diagnostics, tc.code)
+		}
+	}
+}
