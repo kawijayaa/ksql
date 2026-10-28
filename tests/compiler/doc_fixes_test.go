@@ -284,3 +284,52 @@ func TestSequenceDetectLowering(t *testing.T) {
 		}
 	}
 }
+
+// sliding_window_counts columns and validation; typed datetime expansions
+// convert rather than cast; datetime literals accept spaced dashes.
+func TestSlidingWindowCountsAndTypedExpansion(t *testing.T) {
+	stub := func(name, sqlName string, result ksql.ScalarType) ksql.Option {
+		return ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			call := &sqlast.Call{Name: sqlName}
+			for _, arg := range args {
+				call.Args = append(call.Args, arg.SQL)
+			}
+			return ksql.TypedExpression{Type: result, SQL: call}, nil
+		})
+	}
+	compiler := ksql.New(dialect.SQLite(dialect.WithDatetimeArithmeticFunctions("test_dt_add", "test_dt_diff")),
+		stub("todatetime", "host_todatetime", ksql.TypeDateTime), stub("bin_at", "host_bin_at", ksql.TypeDateTime), stub("range", "host_range", ksql.TypeDynamic),
+		ksql.WithTypedAggregate("dcount", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "host_dcount", Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}))
+	data := `datatable(U:string, T:datetime, D:string)["a", datetime(2026-01-01), "x"]`
+	result := compiler.Compile(data + ` | evaluate sliding_window_counts(U, T, datetime(2026-01-01), datetime(2026-01-07), 3d, 1d, D)`)
+	if !result.OK() {
+		t.Fatal(result.Diagnostics)
+	}
+	names := []string{}
+	for _, column := range result.Columns {
+		names = append(names, column.Name+":"+string(column.Type))
+	}
+	if got := strings.Join(names, " "); got != "T:datetime D:string Count:long dcount:long" {
+		t.Errorf("columns %s", got)
+	}
+	for _, query := range []string{
+		data + ` | evaluate sliding_window_counts(U, D, 1, 2, 1, 1)`,
+		data + ` | evaluate sliding_window_counts(U, T, now(), now(), 7d, "week")`,
+		data + ` | evaluate sliding_window_counts(U, T, now(), now(), 7d)`,
+		`T | evaluate sliding_window_counts(U, T, now(), now(), 7d, 1d)`,
+	} {
+		if result := compiler.Compile(query); result.OK() {
+			t.Errorf("%s: want an error", query)
+		}
+	}
+	expanded := compiler.Compile(`print x = dynamic(["2026-01-01"]) | mv-expand x to typeof(datetime)`)
+	if !expanded.OK() || !strings.Contains(strings.ToLower(expanded.SQL), "host_todatetime") || strings.Contains(expanded.SQL, "TIMESTAMP") {
+		t.Errorf("typed datetime expansion: %v\n%s", expanded.Diagnostics, expanded.SQL)
+	}
+	spaced := compiler.Compile(`print datetime(2017 - 08 - 01 10:00)`)
+	if !spaced.OK() || !strings.Contains(spaced.SQL, "2017-08-01 10:00") {
+		t.Errorf("spaced datetime literal: %v\n%s", spaced.Diagnostics, spaced.SQL)
+	}
+}

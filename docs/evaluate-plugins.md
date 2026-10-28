@@ -31,5 +31,14 @@ Besides `bag_unpack` (see bag-unpack.md), `evaluate` supports:
   `Duration`, ordered by the first step's time. Each step is a filtered
   self-join, at most 16 steps. Wide windows over dense matches produce
   many chains, so applications should bound result sizes.
+- `sliding_window_counts(Id, Timeline, Start, End, LookbackWindow, Bin [, Dim...])`:
+  `Count` and `dcount(Id)` for each `Bin`-aligned window (from `Start` to
+  `End`) over the records in the previous `LookbackWindow`, rounded down to
+  whole bins, per dimension combination. This uses Kusto's sliding-window
+  technique: each record between `Start` and `End` is expanded with
+  `range()` to the windows it falls in, then summarized. Windows with no
+  records are omitted. Calendar bins (`"week"`, `"month"`, `"year"`) are not
+  supported. Each record expands to `LookbackWindow / Bin` rows, bounded by
+  the application's `range()` limit.
 
 Other plugins report `KQLL0391`.

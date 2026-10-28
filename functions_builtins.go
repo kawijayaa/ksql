@@ -2,6 +2,7 @@ package ksql
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kawijayaa/ksql/kql"
@@ -88,7 +89,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 			}
 			return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: kind}
 		}
-		text := expressionText(value.Args[0])
+		text := spacedDate.ReplaceAllString(expressionText(value.Args[0]), "$1-$2-$3")
 		if s.compiler.parameterization == BoundParameters {
 			resultType := TypeUnknown
 			if function == "datetime" || function == "date" {
@@ -444,3 +445,7 @@ func sqliteJSONElement(value sqlast.Expr, kind ScalarType) sqlast.Expr {
 	}
 	return value
 }
+
+// spacedDate matches a date written with spaced dashes, as in Microsoft's
+// datetime(2017 - 08 - 01) examples, which Kusto accepts.
+var spacedDate = regexp.MustCompile(`^\s*(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})\b`)

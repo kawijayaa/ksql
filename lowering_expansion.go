@@ -243,7 +243,9 @@ func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemI
 		objectElement = &sqlast.Call{Name: "json_array", Args: []sqlast.Expr{&sqlast.Identifier{Parts: []string{expansionAlias, "key"}}, jsonValue}}
 	}
 	element = &sqlast.Case{Branches: []sqlast.When{{Condition: isObject, Result: objectElement}}, Else: element}
-	if item.Type != "" {
+	if converted, ok := s.convertExpanded(element, item.Type); ok {
+		element = converted
+	} else if item.Type != "" {
 		types := map[string]string{
 			"long": "BIGINT", "int": "INTEGER", "real": "DOUBLE PRECISION", "double": "DOUBLE PRECISION",
 			"decimal": "DECIMAL", "string": "VARCHAR", "bool": "BOOLEAN", "boolean": "BOOLEAN",
@@ -401,7 +403,11 @@ func (s *compileState) expandArrays(input Relation, items []kql.MvExpansion, ite
 				s.error("KQLL0335", item.Span, feature, "unsupported expansion type "+item.Type)
 				return Relation{}
 			}
-			element = &sqlast.Cast{Expr: element, Type: map[ScalarType]string{TypeLong: "BIGINT", TypeInt: "INTEGER", TypeReal: "DOUBLE PRECISION", TypeString: "VARCHAR", TypeBool: "BOOLEAN", TypeDateTime: "TIMESTAMP", TypeTimespan: "BIGINT", TypeDynamic: "VARCHAR"}[columnType]}
+			if converted, ok := s.convertExpanded(element, item.Type); ok {
+				element = converted
+			} else {
+				element = &sqlast.Cast{Expr: element, Type: map[ScalarType]string{TypeLong: "BIGINT", TypeInt: "INTEGER", TypeReal: "DOUBLE PRECISION", TypeString: "VARCHAR", TypeBool: "BOOLEAN", TypeDateTime: "TIMESTAMP", TypeTimespan: "BIGINT", TypeDynamic: "VARCHAR"}[columnType]}
+			}
 		}
 		elements[strings.ToLower(item.Name)] = element
 		if _, at, replacing, _ := output.Lookup(item.Name); replacing {
@@ -430,4 +436,34 @@ func (s *compileState) expandArrays(input Relation, items []kql.MvExpansion, ite
 		query.Where = &sqlast.Binary{Left: &sqlast.Cast{Expr: position, Type: "INTEGER"}, Operator: "<", Right: s.expression(limit).SQL}
 	}
 	return Relation{Query: query, Schema: output}
+}
+
+// expandedConversions are the expansion types SQL casts get wrong: SQLite
+// gives TIMESTAMP and UUID numeric affinity, turning "2017-08-01" into 2017.
+var expandedConversions = map[string]string{"datetime": "todatetime", "date": "todatetime", "timespan": "totimespan", "time": "totimespan", "guid": "toguid", "uniqueid": "toguid"}
+
+// convertExpanded converts an expanded element with the KQL conversion
+// function for typeName, reporting false when the type needs none or the
+// dialect cannot bind it.
+func (s *compileState) convertExpanded(element sqlast.Expr, typeName string) (sqlast.Expr, bool) {
+	function, ok := expandedConversions[strings.ToLower(typeName)]
+	if !ok {
+		return nil, false
+	}
+	const placeholder = "__ksql_element"
+	previousInput, previousQualifier, mark := s.input, s.qualifier, len(s.diagnostics)
+	s.input, s.qualifier = Schema{Columns: []Column{{Name: placeholder, Type: TypeString}}}, ""
+	bound := s.expression(&kql.CallExpression{Function: &kql.NameExpression{Name: function}, Args: []kql.Expression{&kql.NameExpression{Name: placeholder}}})
+	s.input, s.qualifier = previousInput, previousQualifier
+	failed := bound.SQL == nil
+	for _, diagnostic := range s.diagnostics[mark:] {
+		failed = failed || diagnostic.Severity == SeverityError
+	}
+	if failed {
+		s.diagnostics = s.diagnostics[:mark]
+		return nil, false
+	}
+	return substituteIdentifiers(bound.SQL, func(name string) (sqlast.Expr, bool) {
+		return element, name == placeholder
+	}), true
 }

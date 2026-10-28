@@ -47,6 +47,8 @@ func (s *compileState) evaluate(input Relation, operator kql.Operator) Relation 
 		return s.ipLookup(input, spec, feature, "ipv4_is_in_range")
 	case "ipv6_lookup":
 		return s.ipLookup(input, spec, feature, "ipv6_is_in_range")
+	case "sliding_window_counts":
+		return s.slidingWindowCounts(input, spec, operator, feature)
 	case "sequence_detect":
 		return s.sequenceDetect(input, spec, feature)
 
