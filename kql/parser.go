@@ -106,13 +106,17 @@ func parseLet(tokens []Token) (Statement, []ParseError) {
 		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokens[equal].Span}}
 	}
 	// let V = view () { ... } declares a parameterless view function.
+	view := false
 	if len(value) > 1 && lower(value[0]) == "view" && value[1].Text == "(" {
-		value = value[1:]
+		value, view = value[1:], true
 	}
 	if value[0].Text == "(" {
 		close := matchingClose(value, 0)
 		if close >= 0 && close+1 < len(value) && value[close+1].Text == "{" {
 			function, errs := parseFunctionDefinition(value, close)
+			if function != nil {
+				function.View = view
+			}
 			statement.Function = function
 			return statement, errs
 		}

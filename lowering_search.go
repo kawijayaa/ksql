@@ -255,8 +255,16 @@ func (s *compileState) resolveTablePatterns(patterns []string, explicit bool, sp
 	var all []string
 	if lister != nil {
 		all = lister.TableNames()
-		sort.Strings(all)
 	}
+	// Views declared with let V = view () { ... } are searched like tables.
+	views := 0
+	for _, function := range s.functions {
+		if function.definition != nil && function.definition.View && function.tabular && len(function.parameters) == 0 {
+			all = append(all, function.name)
+			views++
+		}
+	}
+	sort.Strings(all)
 	var names []string
 	seen := map[string]bool{}
 	add := func(name string) {
@@ -273,7 +281,7 @@ func (s *compileState) resolveTablePatterns(patterns []string, explicit bool, sp
 			add(unquoteKQL(pattern))
 			continue
 		}
-		if lister == nil {
+		if lister == nil && views == 0 {
 			s.bindError("KQLB0356", span, feature, "searching table patterns or every table requires a catalog that lists its tables")
 			return nil, false
 		}

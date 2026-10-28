@@ -39,7 +39,10 @@ type FunctionDefinition struct {
 	Lets       []*LetStatement
 	Result     Expression
 	Pipeline   *Pipeline
-	Span       Span
+	// View marks let V = view () { ... }, which table-less search and find
+	// include.
+	View bool
+	Span Span
 }
 
 func (*ExpressionStatement) statementNode()   {}

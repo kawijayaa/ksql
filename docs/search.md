@@ -19,8 +19,9 @@ switches string operators to their `_cs` forms; `default` and
 
 A search that starts a query (`search "x"` or `search in (T1, A*) "x"`) unions
 the named tables, or every table, with a `$table` column naming each row's
-table. Table patterns and table-less searches need a catalog implementing
-`ksql.TableLister`; at most 256 tables are searched (`KQLB0356`). `in (...)`
+table. Views declared with `let V = view () { ... }` are included. Table
+patterns and table-less searches over catalog tables need a catalog
+implementing `ksql.TableLister`; at most 256 tables are searched (`KQLB0356`). `in (...)`
 cannot follow a tabular input (`KQLP0356`).
 
 `has` itself accepts terms with punctuation, such as IP addresses: the term
