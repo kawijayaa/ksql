@@ -172,3 +172,10 @@ term known only per row, such as a column. The pattern is built at run time
 from the application's `regex_quote` of the term, so data cannot inject
 regex syntax. An empty term never matches. Compile-time constants, including
 `let` values and function parameters, use the literal path.
+
+`array_sort_asc`/`array_sort_desc` over several arrays, when projected
+directly, produce one column per array, named `<array>_sorted` or by a tuple
+`(a, b) = ...`. An indexed call such as `array_sort_asc(t, c)[1]` keeps the
+array of sorted arrays. `WithRealDivision(function)` lowers real-typed
+division to an application function, for SQL engines that return null where
+Kusto divides by zero to ±∞.

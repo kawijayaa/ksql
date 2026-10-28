@@ -489,3 +489,31 @@ func TestLetBoundRowLimits(t *testing.T) {
 		}
 	}
 }
+
+// array_sort over several arrays projects one column per array, and
+// WithRealDivision routes real division to the application.
+func TestArraySortColumnsAndRealDivision(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithRealDivision("host_divide"),
+		ksql.WithTypedFunction("array_sort_asc", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			call := &sqlast.Call{Name: "host_sort"}
+			for _, arg := range args {
+				call.Args = append(call.Args, arg.SQL)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: call}, nil
+		}))
+	result := compiler.Compile(`let a1 = dynamic([2, 1]); let a2 = dynamic(["b", "a"]); print array_sort_asc(a1, a2), x = array_sort_asc(a1, a2)[1], (p, q) = array_sort_asc(a1, a2, false)`)
+	if !result.OK() {
+		t.Fatal(result.Diagnostics)
+	}
+	var names []string
+	for _, column := range result.Columns {
+		names = append(names, column.Name)
+	}
+	if got := strings.Join(names, " "); got != "a1_sorted a2_sorted x p q" {
+		t.Errorf("columns %s", got)
+	}
+	division := compiler.Compile(`print a = 1.0 / 0.0, b = 7 / 2`)
+	if !division.OK() || strings.Count(strings.ToLower(division.SQL), "host_divide") != 1 {
+		t.Errorf("real division: %v\n%s", division.Diagnostics, division.SQL)
+	}
+}

@@ -9,6 +9,7 @@ import (
 )
 
 func (s *compileState) projectItems(expressions []kql.Expression, inferAlias bool, input Schema, printStyle bool) ([]sqlast.SelectItem, Schema) {
+	expressions = expandArraySorts(expressions)
 	span := spanOfExpressions(expressions)
 	if !s.checkProjectionWidth(len(expressions), span, "expression.projection") {
 		return nil, Schema{}
@@ -95,6 +96,7 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 }
 
 func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions []kql.Expression, operator kql.Operator) Relation {
+	expressions = expandArraySorts(expressions)
 	if !s.checkProjectionLimit(expressions, operator) {
 		return Relation{}
 	}

@@ -186,3 +186,9 @@ func validSQLName(name string) bool {
 	}
 	return true
 }
+
+// WithRealDivision lowers real-typed division to function(left, right), for
+// applications whose SQL returns null where Kusto divides by zero to ±∞.
+func WithRealDivision(function string) Option {
+	return func(compiler *Compiler) { compiler.realDivision = function }
+}

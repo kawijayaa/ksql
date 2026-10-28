@@ -206,6 +206,9 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 	} else if left.Type == TypeLong || right.Type == TypeLong {
 		resultType = TypeLong
 	}
+	if op == "/" && resultType == TypeReal && s.compiler.realDivision != "" {
+		return boundExpr{SQL: &sqlast.Call{Name: s.compiler.realDivision, Args: []sqlast.Expr{left.SQL, right.SQL}}, Type: TypeReal}
+	}
 	return boundExpr{SQL: &sqlast.Binary{Left: left.SQL, Operator: op, Right: right.SQL}, Type: resultType}
 }
 

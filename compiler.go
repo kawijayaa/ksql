@@ -17,6 +17,7 @@ type Compiler struct {
 	aggregateRules     map[string]bool
 	scalarOverloads    map[string]int
 	operatorRules      map[string]OperatorRule
+	realDivision       string
 	sourceRules        map[string]SourceRule
 	catalog            Catalog
 	parameterization   ParameterizationMode
