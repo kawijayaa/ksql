@@ -28,6 +28,7 @@ func TestDocumentationSyntaxFixes(t *testing.T) {
 		{`datatable(x:long)[1, long(null), 3] | summarize count(x), count(), countif(x > 1)`, `[[3 3 1]]`},
 		{`datatable(s:string)["555-1", "x"] | extend n = iff(s == "x", string(null), s) | where n !startswith "555" and n !contains "1" and n !endswith "9" | project s`, `[[x]]`},
 		{`let Range10 = view () { range MyColumn from 1 to 10 step 1 }; let Range20 = view () { range MyColumn from 1 to 20 step 1 }; let NotView = () { range MyColumn from 1 to 5 step 1 }; search MyColumn == 5 | order by ['$table'] asc`, `[[Range10 5] [Range20 5]]`},
+		{`range x from 1 to 3 step 1 | consume`, `[]`},
 		{`union withsource=TableName (range x from 1 to 2 step 1 | as T1), (range x from 1 to 1 step 1 | as T2) | order by TableName asc, x asc`, `[[T1 1] [T1 2] [T2 1]]`},
 	} {
 		result := compiler.Compile(tc.query)

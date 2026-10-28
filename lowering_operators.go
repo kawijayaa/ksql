@@ -42,6 +42,15 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return s.makeSeries(input, operator)
 		}
 	}
+	if operator.Kind == "consume" {
+		// consume reads its input but returns no records to the client.
+		if input.Schema.Unknown {
+			s.bindError("KQLB0363", operator.Span, "operator.consume", "consume requires a bound input schema")
+			return Relation{}
+		}
+		empty := &sqlast.Binary{Left: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}, Where: empty}, Schema: input.Schema.Clone()}
+	}
 	if operator.Kind == "top-hitters" {
 		if _, ok := operator.Body.(kql.TopHittersSpec); ok {
 			return s.topHitters(input, operator)
