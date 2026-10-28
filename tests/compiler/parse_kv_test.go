@@ -64,8 +64,8 @@ func TestParseKVExecution(t *testing.T) {
 		{`print str=@'["referer url: https://hostname.com/redirect?dest=/?h=1234", "request url: https://hostname.com/?h=1234", "advertiser id: 24fefbca-cf27-4d62-a623-249c2ad30c73"]' | parse-kv str as (['referer url']:string, ['request url']:string, ['advertiser id']: string) with (regex=@'"([\w ]+)\s*:\s*([^"]*)"') | project-away str`,
 			`[[https://hostname.com/redirect?dest=/?h=1234 https://hostname.com/?h=1234 24fefbca-cf27-4d62-a623-249c2ad30c73]]`, `string string string`},
 		// Missing keys and failed conversions are null; existing columns are replaced in place.
-		{`datatable(a:string, s:string)["old","a=1 b=x"] | parse-kv s as (a:long, b:long, c) with (pair_delimiter=' ', kv_delimiter='=') | project a, b, c, s`, `[[1 <nil> <nil> a=1 b=x]]`, `long long string string`},
-		{`datatable(n:long)[5] | parse-kv n as (x) | project n, x`, `[[5 <nil>]]`, `long string`},
+		{`datatable(a:string, s:string)["old","a=1 b=x"] | parse-kv s as (a:long, b:long, c) with (pair_delimiter=' ', kv_delimiter='=') | project a, b, c, s`, `[[1 <nil>  a=1 b=x]]`, `long long string string`},
+		{`datatable(n:long)[5] | parse-kv n as (x) | project n, x`, `[[5 ]]`, `long string`},
 		{`datatable(s:string)['k"q=v'] | parse-kv s as (['k"q']) with (pair_delimiter=' ', kv_delimiter='=') | project ['k"q']`, `[[v]]`, `string`},
 		{`datatable(s:string)["user='); DROP TABLE x; --"] | parse-kv s as (user) with (pair_delimiter=' ', kv_delimiter='=') | project user`, `[[');]]`, `string`},
 	} {

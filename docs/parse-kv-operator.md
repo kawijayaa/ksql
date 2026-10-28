@@ -38,8 +38,9 @@ may be repeated, requires `quote`, and makes the next character literal inside
 quotes. An unterminated quote runs to the end of the value.
 
 Keys match exactly. Only requested keys are extracted, and the first appearance
-wins. Keys and values are trimmed of surrounding whitespace. Missing keys and
-failed conversions are null. Columns with an input column's name replace it in
+wins. Keys and values are trimmed of surrounding whitespace. A missing string
+key is an empty string; missing keys of other types and failed conversions are
+null, as documented ("null or an empty string, depending on the column type"). Columns with an input column's name replace it in
 place. Non-string sources are converted with `tostring`.
 
 ## Validation and limits
@@ -71,5 +72,4 @@ engine:
 - Free-mode pairing when a value token equals a requested key.
 - Whether `_` counts as alphanumeric in free mode. Here it is a delimiter,
   following the documentation's wording.
-- Empty-string versus null for missing string keys.
 - Live-engine differential conformance.

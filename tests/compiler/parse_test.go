@@ -143,7 +143,7 @@ func TestParseOperatorExecution(t *testing.T) {
 			{`datatable(s:string)["Event (totalSlices=nonValidLongValue, sliceNumber=20, releaseTime=nonValidDateTime 08:40:01, x)"] | parse kind=relaxed s with * "totalSlices=" totalSlices: long ", sliceNumber=" sliceNumber: long * "releaseTime=" releaseTime: date "," * | project totalSlices, sliceNumber, releaseTime`,
 				`[[<nil> 20 <nil>]]`, `long long datetime`},
 			{`datatable(s:string)["x=12abc, y=3.5z;"] | parse kind=relaxed s with "x=" x:long ", y=" y:real ";" | project x, y`, `[[<nil> <nil>]]`, `long real`},
-			{`datatable(s:string)["n=7, m=5, t=nonValidDateTime, u=x"] | parse s with "n=" n:long ", m=" m:long ", t=" t:datetime ", u=" u | project n, m, t, u`, `[[<nil> <nil> <nil> <nil>]]`, `long long datetime string`},
+			{`datatable(s:string)["n=7, m=5, t=nonValidDateTime, u=x"] | parse s with "n=" n:long ", m=" m:long ", t=" t:datetime ", u=" u | project n, m, t, u`, `[[<nil> <nil> <nil> ]]`, `long long datetime string`},
 			{`datatable(s:string)["n=bad, m=5"] | parse s with "n=" n:long ", m=" m:long | project n, m`, `[[<nil> <nil>]]`, `long long`},
 			// Unmatched rows are retained with null columns; the match is anchored.
 			{`datatable(s:string)["x=1","prefix x=2","x=3 suffix","other"] | parse s with "x=" x:long | project s, x`, `[[x=1 1] [prefix x=2 <nil>] [x=3 suffix <nil>] [other <nil>]]`, `string long`},
@@ -192,7 +192,7 @@ func TestParseWhereDocumentedExamples(t *testing.T) {
 	compiler := parseCompiler(ksql.BoundParameters)
 	pattern := ` EventText with * "resourceName=" resourceName ", totalSlices=" totalSlices: long * "sliceNumber=" sliceNumber: long * "lockTime=" lockTime ", releaseTime=" releaseTime: date "," * "previousLockTime=" previousLockTime: date ")" * | project resourceName, totalSlices, sliceNumber, releaseTime`
 	for _, tc := range []struct{ query, want string }{
-		{parseWhereTraces + `Traces | parse` + pattern, `[[<nil> <nil> <nil> <nil>] [<nil> <nil> <nil> <nil>] [PipelineScheduler 27 20 2016-02-17T08:40:01Z] [<nil> <nil> <nil> <nil>]]`},
+		{parseWhereTraces + `Traces | parse` + pattern, `[[ <nil> <nil> <nil>] [ <nil> <nil> <nil>] [PipelineScheduler 27 20 2016-02-17T08:40:01Z] [ <nil> <nil> <nil>]]`},
 		{parseWhereTraces + `Traces | parse-where` + pattern, `[[PipelineScheduler 27 20 2016-02-17T08:40:01Z]]`},
 		{parseWhereTraces + `Traces | parse-where kind = regex EventText with * "RESOURCENAME=" resourceName "," * "totalSlices=" totalSlices: long "," * | project resourceName, totalSlices`, `[]`},
 		{parseWhereTraces + `Traces | parse-where kind = regex flags=i EventText with * "RESOURCENAME=" resourceName "," * "totalSlices=" totalSlices: long "," * | project resourceName, totalSlices`, `[[PipelineScheduler 27] [PipelineScheduler 27] [PipelineScheduler 27]]`},

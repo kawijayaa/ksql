@@ -60,15 +60,15 @@ converted with `tostring`.
 
 ## Failure semantics
 
-- No match: every extracted column is null and `parse-where` drops the row.
+- No match: every extracted column is null (an empty string for string
+  columns, since KQL strings have no null) and `parse-where` drops the row.
 - `simple` and `regex` are strict: if any typed conversion fails, every
-  extracted column is null, and `parse-where` drops the row.
+  extracted column is null or empty, and `parse-where` drops the row.
 - `relaxed`: each failed conversion is null and the others keep their values.
   `parse-where` rejects `kind=relaxed`.
 
 Columns with the same name as an input column replace it in place, as `extend`
-does. Failed string columns are SQL null, matching the rest of KSQL's string
-lowering, where Kusto would display an empty string.
+does. Failed string columns are empty strings, as `tostring` of null is empty.
 
 ## Evaluation and resource bounds
 

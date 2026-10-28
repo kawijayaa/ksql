@@ -85,3 +85,9 @@ Sources:
 - [Logical operators](https://learn.microsoft.com/en-us/kusto/query/logical-operators)
 - [Pinned function signatures](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Functions.cs)
 - [Pinned common-type rules](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Symbols/TypeFacts.cs)
+
+## tostring
+
+`tostring(x)` returns an empty string when `x` is null, following Microsoft's
+[tostring()](https://learn.microsoft.com/en-us/kusto/query/tostring-function?view=microsoft-fabric)
+documentation: KQL strings have no null value.

@@ -316,7 +316,11 @@ func (s *compileState) parseOperator(input Relation, operator kql.Operator) Rela
 			if strings.EqualFold(value.column.name, column.Name) {
 				expr = s.columnIdentifier(value.name)
 				if operator.Kind != "parse-where" {
-					expr = &sqlast.Case{Branches: []sqlast.When{{Condition: condition, Result: expr}}}
+					var otherwise sqlast.Expr
+					if value.value.Type == TypeString {
+						otherwise = &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}
+					}
+					expr = &sqlast.Case{Branches: []sqlast.When{{Condition: condition, Result: expr}}, Else: otherwise}
 				}
 				break
 			}

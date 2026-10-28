@@ -261,7 +261,8 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
-		return boundExpr{SQL: &sqlast.Cast{Expr: args[0], Type: "VARCHAR"}, Type: TypeString}
+		// KQL strings have no null: tostring of a null value is empty.
+		return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.Cast{Expr: args[0], Type: "VARCHAR"}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}, Type: TypeString}
 	case "toint", "tolong", "toreal", "todouble", "todatetime", "todecimal", "tobool", "toboolean", "toguid":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
