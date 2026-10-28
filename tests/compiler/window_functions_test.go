@@ -76,7 +76,7 @@ func TestWindowFunctionDiagnostics(t *testing.T) {
 		{`range a from 1 to 3 step 1 | sort by a asc | extend r=row_number(a)`, "KQLB0394"},
 		{`range a from 1 to 3 step 1 | sort by a asc | extend r=row_number(1, 5)`, "KQLB0392"},
 		{`range a from 1 to 3 step 1 | sort by a asc | extend c=row_cumsum("x")`, "KQLB0395"},
-		{`range a from 1 to 3 step 1 | sort by a asc | extend s=row_window_session(a, 1h, 1h)`, "KQLL0390"},
+		{`range a from 1 to 3 step 1 | sort by a asc | extend s=row_window_session(a, 1h, 1h)`, "KQLB0361"},
 	} {
 		result := compiler.Compile(tc.query)
 		if result.OK() || result.SQL != "" || result.Diagnostics[0].Code != tc.code {
