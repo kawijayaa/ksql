@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kawijayaa/ksql/kql"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 func (s *compileState) validateUnique(columns []Column, span kql.Span, feature string) bool {
@@ -52,12 +53,17 @@ func (s *compileState) checkProjectionLimit(expressions []kql.Expression, operat
 }
 
 func (s *compileState) validateLimit(expression kql.Expression, operator kql.Operator) bool {
-	literal, ok := expression.(*kql.LiteralExpression)
-	if !ok || literal.Kind != kql.NumberToken || strings.ContainsAny(literal.Text, ".eE") {
+	text, ok := "", false
+	if literal, isLiteral := expression.(*kql.LiteralExpression); isLiteral {
+		text, ok = literal.Text, literal.Kind == kql.NumberToken
+	} else {
+		text, ok = s.constantInteger(expression)
+	}
+	if !ok || strings.ContainsAny(text, ".eE") {
 		s.bindError("KQLB0302", expression.NodeSpan(), "operator."+operator.Kind, "row limit must be a constant integer")
 		return false
 	}
-	value, err := strconv.ParseInt(literal.Text, 10, 64)
+	value, err := strconv.ParseInt(text, 10, 64)
 	if err != nil || value < 0 {
 		s.bindError("KQLB0302", expression.NodeSpan(), "operator."+operator.Kind, "row limit must be a non-negative bounded integer")
 		return false
@@ -67,6 +73,35 @@ func (s *compileState) validateLimit(expression kql.Expression, operator kql.Ope
 		return false
 	}
 	return true
+}
+
+// constantInteger evaluates a limit such as a let name or function
+// parameter bound to an integer literal, returning its digits.
+func (s *compileState) constantInteger(expression kql.Expression) (string, bool) {
+	saved, mark := len(s.args), len(s.diagnostics)
+	defer func() { s.args, s.diagnostics = s.args[:saved], s.diagnostics[:mark] }()
+	bound := s.expression(expression)
+	if bound.Type != TypeLong && bound.Type != TypeInt {
+		return "", false
+	}
+	switch value := bound.SQL.(type) {
+	case *sqlast.Identifier:
+		// A parameter placeholder while validating a declaration; each call
+		// validates the argument's value.
+		return "0", s.functionValidation
+	case *sqlast.Literal:
+		return value.Value, value.Kind == sqlast.NumberLiteral
+	case *sqlast.Parameter:
+		if value.Index >= 1 && value.Index <= len(s.args) {
+			switch number := s.args[value.Index-1].(type) {
+			case int64:
+				return strconv.FormatInt(number, 10), true
+			case int:
+				return strconv.Itoa(number), true
+			}
+		}
+	}
+	return "", false
 }
 
 func (s *compileState) bindError(code string, span kql.Span, feature, message string) {

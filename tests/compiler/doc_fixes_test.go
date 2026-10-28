@@ -460,3 +460,32 @@ func TestToScalarComputedOnce(t *testing.T) {
 		t.Errorf("toscalar with different arguments: %s", got)
 	}
 }
+
+// Row limits may be let names or function parameters bound to integers.
+func TestLetBoundRowLimits(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, compiler := range []*ksql.Compiler{ksql.New(dialect.SQLite(), ksql.WithParameters()), ksql.New(dialect.SQLite())} {
+		for _, tc := range []struct{ query, want string }{
+			{`let nn = 2; range x from 1 to 5 step 1 | take nn`, `[[1] [2]]`},
+			{`let n = 1; range x from 1 to 5 step 1 | top n by x desc`, `[[5]]`},
+			{`let f = (k:long) { range x from 1 to 5 step 1 | order by x asc | take k }; f(3) | count`, `[[3]]`},
+		} {
+			result := compiler.Compile(tc.query)
+			if !result.OK() {
+				t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+			}
+			if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+				t.Errorf("%s: got %s, want %s", tc.query, got, tc.want)
+			}
+		}
+		for _, query := range []string{`let n = 1.5; print 1 | take n`, `let n = -1; print 1 | take n`, `let s = "2"; print 1 | take s`, `print 1 | take rand()`} {
+			if result := compiler.Compile(query); result.OK() {
+				t.Errorf("%s: want an error", query)
+			}
+		}
+	}
+}
