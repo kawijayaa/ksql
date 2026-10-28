@@ -236,6 +236,31 @@ type PartitionSpec struct {
 
 func (PartitionSpec) operatorBody() {}
 
+// ScanSpec is scan [with_match_id=Id] [declare (Col:type [= default], ...)]
+// with (step Name [output=all|last|none]: Condition [=> Col = Value, ...]; ...).
+type ScanSpec struct {
+	MatchID  string
+	Declares []ScanDeclare
+	Steps    []ScanStep
+}
+
+type ScanDeclare struct {
+	Name    string
+	Type    string
+	Default Expression
+	Span    Span
+}
+
+type ScanStep struct {
+	Name        string
+	Output      string
+	Condition   Expression
+	Assignments []*NamedExpression
+	Span        Span
+}
+
+func (ScanSpec) operatorBody() {}
+
 // FindSpec is find [withsource=Column] [in (Tables)] where Predicate
 // [project-smart | project Column[:Type], ... [, pack_all()]].
 type FindSpec struct {

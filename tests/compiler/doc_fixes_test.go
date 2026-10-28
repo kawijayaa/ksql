@@ -140,3 +140,36 @@ func TestPatternStatements(t *testing.T) {
 		}
 	}
 }
+
+// scan over the serialized input: cumulative state, sequences with match
+// ids, and step validation.
+func TestSQLiteExecScan(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`range x from 1 to 4 step 1 | scan declare (c:long=10) with (step s1: true => c = x + s1.c;)`, `[[1 11] [2 13] [3 16] [4 20]]`},
+		{`datatable(e:string)["a", "start", "b", "stop", "x", "start", "stop"] | scan with_match_id=id with (step s1: e == "start"; step s2: e == "stop";)`, `[[start 0] [stop 0] [start 1] [stop 1]]`},
+		{`range x from 1 to 3 step 1 | scan with (step s1 output=none: true;)`, `[]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	for _, tc := range []struct{ query, code string }{
+		{`range x from 1 to 3 step 1 | scan with (step s1: true; step s1: true;)`, "KQLB0360"},
+		{`range x from 1 to 3 step 1 | scan declare (x:long) with (step s1: true;)`, "KQLB0360"},
+		{`range x from 1 to 3 step 1 | scan with (step s1: true => x = 1;)`, "KQLB0360"},
+		{`range x from 1 to 3 step 1 | scan with (step s1: s1.nope > 1;)`, "KQLB0360"},
+		{`range x from 1 to 3 step 1 | scan with (step s1 output=some: true;)`, "KQLP0359"},
+	} {
+		result := compiler.Compile(tc.query)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {
+			t.Fatalf("%s: diagnostics %v want %s", tc.query, result.Diagnostics, tc.code)
+		}
+	}
+}

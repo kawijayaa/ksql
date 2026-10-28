@@ -130,6 +130,10 @@ func NormalizeParameters(query Query, arguments []any) []any {
 				visitQuery(binding.Query)
 			}
 			visitQuery(value.Query)
+		case *RecursiveQuery:
+			visitQuery(value.Anchor)
+			visitQuery(value.Step)
+			visitQuery(value.Query)
 		case *Select:
 			for i := range value.Projections {
 				value.Projections[i].Expr = expression(value.Projections[i].Expr)

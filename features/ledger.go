@@ -112,6 +112,7 @@ func initEntries() {
 		setSupport("plugin.bag_unpack", Validated, Equivalent, "output schemas, or data-driven slots through an application key resolver; prefix, columnsConflict and ignoredProperties; see docs/bag-unpack.md")
 		setSupport("operator.evaluate", Validated, Equivalent, "bag_unpack, narrow, pivot, ipv4_lookup, ipv6_lookup; other plugins return KQLL0391; see docs/evaluate-plugins.md")
 		setSupport("plugin.narrow plugin.pivot plugin.ipv4_lookup plugin.ipv6_lookup", Validated, Equivalent, "narrow rotation, pivot over discovered or declared values with conditional aggregates, and range-matching IP lookups through application functions; see docs/evaluate-plugins.md")
+		setSupport("operator.scan", Validated, Equivalent, "Kusto's two-check matching logic as a recursive query, with declared columns, step references, match ids and output modes; see docs/scan.md")
 		setSupport("operator.partition", Validated, Equivalent, "per-key UNION ALL branches over values discovered with an application ValuesResolver; legacy (64 keys, own-source bodies), native and shuffle (1024 keys); see docs/partition.md")
 		setSupport("function.pack_all", Validated, Equivalent, "packs the input schema through the application's bag_pack, omitting null/empty columns with ignore_null_empty; see docs/search.md")
 		setSupport("source.find", Validated, Equivalent, "find over listed tables and patterns with withsource, project-smart and project lists, and pack_ through the application's bag functions; typed column splitting remains incomplete; see docs/search.md")

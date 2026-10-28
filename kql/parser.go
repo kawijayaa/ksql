@@ -377,6 +377,9 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 	if kind == "partition" {
 		return parsePartition(op, body)
 	}
+	if kind == "scan" {
+		return parseScan(op, body)
+	}
 	if kind != "as" {
 		body = stripQueryHints(body)
 	}

@@ -91,6 +91,24 @@ func (r renderer) query(query sqlast.Query) (string, error) {
 			return body, nil
 		}
 		return "WITH " + strings.Join(parts, ", ") + " " + body, nil
+	case *sqlast.RecursiveQuery:
+		anchor, err := r.query(q.Anchor)
+		if err != nil {
+			return "", err
+		}
+		step, err := r.query(q.Step)
+		if err != nil {
+			return "", err
+		}
+		body, err := r.query(q.Query)
+		if err != nil {
+			return "", err
+		}
+		columns := make([]string, len(q.Columns))
+		for i, column := range q.Columns {
+			columns[i] = r.dialect.QuoteIdentifier(column)
+		}
+		return "WITH RECURSIVE " + r.dialect.QuoteIdentifier(q.Name) + "(" + strings.Join(columns, ", ") + ") AS (" + anchor + " UNION ALL " + step + ") " + body, nil
 	case *sqlast.Select:
 		return r.selectQuery(q)
 	case *sqlast.Union:
@@ -233,6 +251,11 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 	switch s := source.(type) {
 	case *sqlast.MaterializedReference:
 		return r.dialect.QuoteIdentifier(s.Name), nil
+	case *sqlast.CTE:
+		if s.Alias == "" {
+			return r.dialect.QuoteIdentifier(s.Name), nil
+		}
+		return r.dialect.QuoteIdentifier(s.Name) + " AS " + r.dialect.QuoteIdentifier(s.Alias), nil
 	case *sqlast.Table:
 		parts := make([]string, len(s.Parts))
 		for i, part := range s.Parts {

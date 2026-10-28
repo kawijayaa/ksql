@@ -43,6 +43,26 @@ type Binding struct {
 
 func (*With) queryNode() {}
 
+// RecursiveQuery is WITH RECURSIVE Name(Columns) AS (Anchor UNION ALL Step)
+// Query; Step and Query reference the binding through CTE sources.
+type RecursiveQuery struct {
+	Name    string
+	Columns []string
+	Anchor  Query
+	Step    Query
+	Query   Query
+}
+
+func (*RecursiveQuery) queryNode() {}
+
+// CTE references a common table expression by name.
+type CTE struct {
+	Name  string
+	Alias string
+}
+
+func (*CTE) sourceNode() {}
+
 type SelectItem struct {
 	Expr  Expr
 	Alias string
