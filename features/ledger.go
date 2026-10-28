@@ -113,6 +113,7 @@ func initEntries() {
 		setSupport("operator.evaluate", Validated, Equivalent, "bag_unpack, narrow, pivot, ipv4_lookup, ipv6_lookup and rows_near; other plugins return KQLL0391; see docs/evaluate-plugins.md")
 		setSupport("plugin.narrow plugin.pivot plugin.ipv4_lookup plugin.ipv6_lookup plugin.rows_near", Validated, Equivalent, "narrow rotation, pivot over discovered or declared values with conditional aggregates, and range-matching IP lookups through application functions; see docs/evaluate-plugins.md")
 		setSupport("function.row_window_session", Validated, Equivalent, "named extend items lowered through scan with prev()-capable restart conditions; see docs/scan.md")
+		setSupport("operator.top-nested operator.top-hitters", Validated, Equivalent, "nested per-parent ranking with row_number() and exact top-hitters; top-nested with others is unsupported; see docs/top-nested.md")
 		setSupport("operator.scan", Validated, Equivalent, "Kusto's two-check matching logic as a recursive query, with declared columns, step references, match ids and output modes; see docs/scan.md")
 		setSupport("operator.partition", Validated, Equivalent, "per-key UNION ALL branches over values discovered with an application ValuesResolver; legacy (64 keys, own-source bodies), native and shuffle (1024 keys); see docs/partition.md")
 		setSupport("function.pack_all", Validated, Equivalent, "packs the input schema through the application's bag_pack, omitting null/empty columns with ignore_null_empty; see docs/search.md")

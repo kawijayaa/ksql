@@ -3,6 +3,7 @@ package compiler_test
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kawijayaa/ksql"
@@ -172,5 +173,40 @@ func TestSQLiteExecScan(t *testing.T) {
 		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {
 			t.Fatalf("%s: diagnostics %v want %s", tc.query, result.Diagnostics, tc.code)
 		}
+	}
+}
+
+// top-hitters and top-nested over small tables.
+func TestSQLiteExecTopHittersAndNested(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	data := `datatable(host:string, user:string, bytes:long)["a", "u1", 10, "a", "u2", 5, "a", "u1", 1, "b", "u3", 100, "b", "u4", 1, "c", "u5", 2]`
+	for _, tc := range []struct{ query, columns, want string }{
+		{data + ` | top-hitters 2 of host`, `host approximate_count_host`, `[[a 3] [b 2]]`},
+		{data + ` | top-hitters 1 of host by bytes`, `host approximate_sum_bytes`, `[[b 101]]`},
+		{data + ` | top-nested 2 of host by sum(bytes), top-nested 1 of user by sum(bytes) | order by host asc`, `host aggregated_host user aggregated_user`, `[[a 16 u1 11] [b 101 u3 100]]`},
+		{data + ` | top-nested of host by n=count(), top-nested 1 of u=user by s=max(bytes) asc | order by host asc`, `host n u s`, `[[a 3 u2 5] [b 2 u4 1] [c 1 u5 2]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		names := []string{}
+		for _, column := range result.Columns {
+			names = append(names, column.Name)
+		}
+		if got := strings.Join(names, " "); got != tc.columns {
+			t.Fatalf("%s: columns %s want %s", tc.query, got, tc.columns)
+		}
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	if result := compiler.Compile(data + ` | top-nested 1 of host with others = "x" by count()`); len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLB0362" {
+		t.Fatalf("with others: %v", result.Diagnostics)
 	}
 }

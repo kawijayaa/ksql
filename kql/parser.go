@@ -380,6 +380,12 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 	if kind == "scan" {
 		return parseScan(op, body)
 	}
+	if kind == "top-hitters" {
+		return parseTopHitters(op, stripQueryHints(body))
+	}
+	if kind == "top-nested" {
+		return parseTopNested(op, stripQueryHints(body))
+	}
 	if kind != "as" {
 		body = stripQueryHints(body)
 	}

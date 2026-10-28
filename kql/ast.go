@@ -261,6 +261,29 @@ type ScanStep struct {
 
 func (ScanSpec) operatorBody() {}
 
+// TopHittersSpec is top-hitters Count of Value [by Sum].
+type TopHittersSpec struct {
+	Count Expression
+	Value Expression
+	By    Expression
+}
+
+// TopNestedLevel is one [N] of Expr [with others = Const] by Aggregation
+// [asc|desc] clause.
+type TopNestedLevel struct {
+	Count       Expression
+	Value       Expression
+	Others      Expression
+	Aggregation Expression
+	Ascending   bool
+	Span        Span
+}
+
+type TopNestedSpec struct{ Levels []TopNestedLevel }
+
+func (TopHittersSpec) operatorBody() {}
+func (TopNestedSpec) operatorBody()  {}
+
 // FindSpec is find [withsource=Column] [in (Tables)] where Predicate
 // [project-smart | project Column[:Type], ... [, pack_all()]].
 type FindSpec struct {

@@ -158,6 +158,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Partitioned subqueries with `partition`](docs/partition.md)
 - [Pattern statements](docs/patterns.md)
 - [Sequences with `scan`](docs/scan.md)
+- [top-nested and top-hitters](docs/top-nested.md)
 - [evaluate plugins: narrow, pivot and IP lookups](docs/evaluate-plugins.md)
 - [Visualization annotations with `render`](docs/render-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)

@@ -42,6 +42,16 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return s.makeSeries(input, operator)
 		}
 	}
+	if operator.Kind == "top-hitters" {
+		if _, ok := operator.Body.(kql.TopHittersSpec); ok {
+			return s.topHitters(input, operator)
+		}
+	}
+	if operator.Kind == "top-nested" {
+		if _, ok := operator.Body.(kql.TopNestedSpec); ok {
+			return s.topNested(input, operator)
+		}
+	}
 	if operator.Kind == "scan" {
 		if _, ok := operator.Body.(kql.ScanSpec); ok {
 			return s.scan(input, operator)
