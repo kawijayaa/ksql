@@ -207,6 +207,11 @@ func parseSource(tokens []Token) (Source, []ParseError) {
 	if tokens[0].Text == "." {
 		return parseManagement(source, tokens)
 	}
+	if lower(tokens[0]) == "search" {
+		spec, errs := parseSearchSpec(tokens[1:], source.Span)
+		source.Kind, source.Search = "search", &spec
+		return source, errs
+	}
 	if lower(tokens[0]) == "union" {
 		op, errs := parseUnion(Operator{Kind: "union", Span: source.Span}, tokens[1:])
 		spec := op.Body.(UnionSpec)
@@ -351,8 +356,11 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 			op.Body = RawSpec{Tokens: body}
 			return op, nil
 		}
-		expr, errs := parseExpressionTokens(body)
-		op.Body = SearchSpec{Term: expr}
+		spec, errs := parseSearchSpec(body, op.Span)
+		if spec.HasTables && len(errs) == 0 {
+			errs = append(errs, ParseError{Code: "KQLP0356", Message: "search in (...) cannot follow a tabular input", Span: op.Span})
+		}
+		op.Body = spec
 		return op, errs
 	case "project-away", "project-keep", "project-reorder":
 		return parseColumnSelection(op, body)

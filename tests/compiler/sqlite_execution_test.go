@@ -16,8 +16,17 @@ const sqliteTestDriver = "ksql_sqlite3"
 
 func init() {
 	sql.Register(sqliteTestDriver, &sqlite3.SQLiteDriver{ConnectHook: func(connection *sqlite3.SQLiteConn) error {
-		return connection.RegisterFunc("kql_regex", func(pattern, value string) bool {
-			matched, err := regexp.MatchString(pattern, value)
+		// SQL NULL values (such as union columns missing from a leg) never match.
+		return connection.RegisterFunc("kql_regex", func(pattern, value any) bool {
+			patternText, okPattern := pattern.(string)
+			text, okValue := value.(string)
+			if bytes, ok := value.([]byte); ok && bytes != nil {
+				text, okValue = string(bytes), true
+			}
+			if !okPattern || !okValue {
+				return false
+			}
+			matched, err := regexp.MatchString(patternText, text)
 			return err == nil && matched
 		}, true)
 	}})

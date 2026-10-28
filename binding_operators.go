@@ -1,6 +1,8 @@
 package ksql
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -218,16 +220,23 @@ func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expr
 		return nil, false
 	}
 	term := stringLiteralValue(literal)
-	if !isAlphaNumeric(term) {
+	if term == "" {
 		return nil, false
 	}
+	// Terms with punctuation (such as an IP address) match as a phrase
+	// bounded by non-alphanumeric characters; regex metacharacters are escaped.
+	quoted := regexp.QuoteMeta(term)
 	leftBoundary, rightBoundary := s.termBoundaries()
-	pattern := leftBoundary + term + rightBoundary
+	pattern := leftBoundary + quoted + rightBoundary
 	switch mode {
 	case "prefix":
-		pattern = leftBoundary + term + `[[:alnum:]]*`
+		pattern = leftBoundary + quoted + `[[:alnum:]]*`
 	case "suffix":
-		pattern = leftBoundary + `[[:alnum:]]*` + term + rightBoundary
+		pattern = leftBoundary + `[[:alnum:]]*` + quoted + rightBoundary
+	}
+	if limit := s.compiler.limits.MaxRegexBytes; limit > 0 && len(pattern) > limit {
+		s.bindError("KQLB0353", literal.Span, "operator.scalar.has", fmt.Sprintf("term pattern exceeds MaxRegexBytes (%d)", limit))
+		return nil, false
 	}
 	result := sqlast.Expr(&sqlast.Regex{Value: left, Pattern: s.bind(pattern), CaseSensitive: caseSensitive})
 	if negative {

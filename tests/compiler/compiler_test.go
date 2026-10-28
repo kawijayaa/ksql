@@ -266,10 +266,16 @@ func TestCompileTermOperatorRequiresRegex(t *testing.T) {
 	}
 }
 
-func TestCompileTermOperatorRejectsNonTermLiteral(t *testing.T) {
-	result := ksql.New(dialect.PostgreSQL()).Compile(`Events | where RawData has "target-string"`)
-	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0404" {
+// Terms with punctuation match as a bounded phrase with escaped metacharacters;
+// a non-literal term is still rejected.
+func TestCompileTermOperatorPhrases(t *testing.T) {
+	result := ksql.New(dialect.PostgreSQL()).Compile(`Events | where RawData has "10.0.0.1" and RawData has "target-string"`)
+	if !result.OK() || !strings.Contains(result.SQL, `10\.0\.0\.1([^[:alnum:]]|$)`) || !strings.Contains(result.SQL, `target-string`) {
 		t.Fatalf("Compile() = %#v", result)
+	}
+	result = ksql.New(dialect.PostgreSQL()).Compile(`Events | where RawData has strcat("a", "b")`)
+	if result.OK() || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLL0404" {
+		t.Fatalf("non-literal term: %#v", result.Diagnostics)
 	}
 }
 

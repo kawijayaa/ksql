@@ -15,7 +15,7 @@ positioned diagnostic and no partial SQL.
 | `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Exact names and case-sensitive `*` patterns; input column order retained |
 | `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
 | `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Exact names and `*` patterns; ordinal and natural numeric sorting; first match wins; unspecified columns retain input order |
-| `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent for one non-empty literal string; regex metacharacters are escaped and wide inputs can be bounded |
+| `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent: terms with `*` placement (has, hasprefix, hassuffix, contains, regex), `Column:"term"`, `*`, Boolean combinations, `kind=case_sensitive`, and standalone `search [in (Tables)]` over a `TableLister` catalog with `$table`; see docs/search.md |
 | `join kind=inner` | Yes | `JoinSpec` | Yes | Yes | SQLite | Explicit KQL output aliases; right collisions use deterministic numeric suffixes |
 | `leftouter`, `rightouter`, `fullouter` | Yes | `JoinSpec` | Yes | Yes | Renderer-dependent | Database join behavior; SQLite version must support requested join |
 | `leftsemi`, `leftanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite (`leftanti`) | Equivalent for supported key predicates |
