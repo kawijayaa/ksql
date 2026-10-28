@@ -214,6 +214,10 @@ func firstArgumentResultName(function string) bool {
 	return false
 }
 
+// inferredName applies Kusto's result-name rules: a bound name (dynamic paths,
+// propagated first arguments) wins, a column reference keeps its name, and a
+// call follows its function's ResultNameKind. Calls without a rule have no
+// name, so projection binding generates ColumnN.
 func inferredName(expression kql.Expression, boundName string) string {
 	if boundName != "" {
 		return boundName
@@ -222,20 +226,34 @@ func inferredName(expression kql.Expression, boundName string) string {
 	case *kql.NameExpression:
 		return lastName(value.Name)
 	case *kql.CallExpression:
-		if function, ok := value.Function.(*kql.NameExpression); ok {
-			if firstArgumentResultName(strings.ToLower(function.Name)) {
-				// Binding supplies the first argument's inferred name. An
-				// unnamed argument must remain unnamed, yielding ColumnN.
-				return ""
+		function, ok := value.Function.(*kql.NameExpression)
+		if !ok {
+			return ""
+		}
+		name := strings.ToLower(lastName(function.Name))
+		rule, ok := resultNameRules[name]
+		if !ok {
+			return ""
+		}
+		first := ""
+		if len(value.Args) > 0 {
+			first = inferredName(value.Args[0], "")
+		}
+		switch rule.kind {
+		case resultFirstArgument:
+			return first
+		case resultOnlyArgument:
+			if len(value.Args) == 1 {
+				return first
 			}
-			// These Microsoft signatures use ResultNameKind.None.
-			// Leaving the name empty lets projection binding generate ColumnN.
-			switch strings.ToLower(lastName(function.Name)) {
-			case "extract_all", "extractall", "parse_url", "parseurl", "parse_urlquery", "parseurlquery", "indexof", "array_concat", "array_reverse", "array_slice", "array_split", "zip", "array_sum", "series_sum", "array_iff", "bag_zip", "set_union", "set_intersect", "set_difference", "jaccard_index",
-				"array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right":
-				return ""
+		case resultPrefixAndFirstArgument:
+			return rule.prefix + "_" + first
+		case resultNameAndFirstArgument:
+			if first != "" {
+				return name + "_" + first
 			}
-			return lastName(function.Name) + "_"
+		case resultPrefixOnly:
+			return rule.prefix
 		}
 	}
 	return ""

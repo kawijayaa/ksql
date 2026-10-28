@@ -108,3 +108,12 @@ same way, so null arguments contribute empty strings. `log` is the natural
 logarithm (SQL `ln`). `in`, `!in`, `in~` and `!in~` expand dynamic array
 members element by element, alongside scalar members; on SQLite this uses
 `json_each`, with invalid JSON treated as an empty array.
+
+## Default column names
+
+Unnamed expressions take Kusto's default names from the `ResultNameKind`
+metadata in Kusto.Language, generated into `result_names.go`. For example,
+`sum(a)` is `sum_a`, `count()` is `count_`, `make_list(a)` is `list_a`,
+`bin(t, 1h)` is `t` and `strlen(s)` is `strlen_s`. Functions without a rule,
+such as `tolower` or `iff`, are unnamed, so `extend` and `project` generate
+`ColumnN`.

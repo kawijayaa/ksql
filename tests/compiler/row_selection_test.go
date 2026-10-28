@@ -35,7 +35,7 @@ func TestArgMinMaxValuesAndSchemas(t *testing.T) {
 			{source + `|summarize argmax(n,label),argmin(n,label)`, `[[3 last 1 first]]`, []string{"max_n", "max_n_label", "min_n", "min_n_label"}},
 			{source + `|summarize latest=arg_max(n,label,n,*),earliest=arg_min(n,*) by g|order by g asc`, `[[a 3 last 1 first] [b 2 only 2 only]]`, []string{"g", "latest", "label", "earliest", "label1"}},
 			{source + `|summarize arg_max(n+2,label) by grp=strcat(g,"!")|order by grp asc`, `[[a! 5 last] [b! 4 only]]`, []string{"grp", "max_", "label"}},
-			{source + `|summarize arg_max(n,label,strcat(label,"!"))`, `[[3 last last!]]`, []string{"n", "label", "strcat_"}},
+			{source + `|summarize arg_max(n,label,strcat(label,"!"))`, `[[3 last last!]]`, []string{"n", "label", "max_n_arg2"}},
 			{`datatable(n:long,label:string)[]|summarize latest=arg_max(n,label),earliest=arg_min(n,label),total=count()`, `[[<nil> <nil> <nil> <nil> 0]]`, []string{"latest", "label", "earliest", "label1", "total"}},
 			{`datatable(g:string,n:long,label:string)[]|summarize arg_max(n,*) by g`, `[]`, []string{"g", "n", "label"}},
 			{`datatable(n:long,label:string)[long(null),"null",2,"two",1,"one"]|summarize arg_min(n,label),arg_max(n,label)`, `[[1 one 2 two]]`, []string{"n", "label", "n1", "label1"}},
