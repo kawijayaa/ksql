@@ -19,6 +19,15 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if declaration, ok := s.functions[function]; ok {
 		return s.callFunction(declaration, value)
 	}
+	if target, ok := functionAliases[function]; ok {
+		return s.call(&kql.CallExpression{Function: &kql.NameExpression{Name: target, Span: name.Span}, Args: value.Args, Span: value.Span})
+	}
+	if function == "column_ifexists" {
+		return s.columnIfExists(value)
+	}
+	if function == "bag_pack_columns" {
+		return s.bagPackColumns(value)
+	}
 	if function == "materialize" {
 		s.bindError("KQLB0524", value.Span, "function.materialize", "materialize returns a table and cannot be used as a scalar expression")
 		return boundExpr{}

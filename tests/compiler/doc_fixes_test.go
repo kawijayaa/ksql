@@ -369,3 +369,36 @@ func TestUnionPatternsArgumentsAndGuids(t *testing.T) {
 		}
 	}
 }
+
+// column_ifexists, bag_pack_columns, table() with parameters and scopes,
+// and documented aliases.
+func TestColumnFunctionsAndTableReferences(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(a:long, b:string)[1, "x"] | project column_ifexists("a", 0), column_ifexists("z", b), columnifexists("b", "")`, `[[1 x x]]`},
+		{`let T = datatable(x:long)[1, 2, 3]; let f = (name:string) { table(name) | count }; f("T")`, `[[3]]`},
+		{`let T = datatable(x:long)[1]; table("T", "all") | count`, `[[1]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		`datatable(a:long)[1] | project column_ifexists(tostring(a), 0)`,
+		`datatable(a:long)[1] | project bag_pack_columns(a + 1)`,
+		`let T = datatable(x:long)[1]; table("T", "warm")`,
+	} {
+		if result := compiler.Compile(query); result.OK() {
+			t.Errorf("%s: want an error", query)
+		}
+	}
+}

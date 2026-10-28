@@ -46,6 +46,16 @@ input columns during declaration validation. Table expressions such as
 datatable arguments, lexical table capture, and nested function declarations.
 Arguments may be named. A positional argument after a named one fills the
 first parameter not yet supplied, as in Kusto's `checkLength(len=3, input)`.
+
+`table(Name [, DataScope])` accepts any compile-time string, including a
+function parameter such as `table(tableName)`. It resolves through the same
+source rules and catalog as a bare name, so it cannot reach tables the
+catalog hides. The data scope (`hotcache`, `all` or `default`) is validated
+and ignored. `column_ifexists(Name, Default)` returns the input's column
+`Name` when the column exists, else `Default`; `Name` may also be a
+parameter. `bag_pack_columns(c1, ...)` is `bag_pack("c1", c1, ...)`. The
+aliases `columnifexists`, `array_strcat`, `arraylength` and `hash_xxhash64`
+bind as `column_ifexists`, `strcat_array`, `array_length` and `hash`.
 `invoke` supplies its input as the first table argument. Both scalar and table
 expansion share the resource limits described above. Exact coercion, case
 resolution, schema-dependent function analysis and engine differential testing

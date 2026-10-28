@@ -127,11 +127,16 @@ func (s *compileState) source(source kql.Source) Relation {
 					return s.materializeCall(call)
 				}
 			}
-			if name, ok := entityName(call); ok {
+			if name, ok := s.tableReference(call); ok {
 				// table("T") and its peers resolve exactly like the bare name T,
 				// through application source rules and the catalog, so they can
 				// never reach storage tables the catalog does not expose.
 				return s.source(kql.Source{Kind: "table", Name: name, Span: call.Span})
+			}
+			if name, ok := call.Function.(*kql.NameExpression); ok && strings.EqualFold(name.Name, "table") && s.functionValidation {
+				// table(parameter) resolves per call; validate the body
+				// against an unknown schema.
+				return Relation{Query: &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Literal{Kind: sqlast.NullLiteral}}}}, Schema: Schema{Unknown: true}}
 			}
 		}
 		s.error("KQLL0201", source.Span, "source.expression", "expression is not a supported tabular source")
@@ -143,22 +148,6 @@ func (s *compileState) source(source kql.Source) Relation {
 
 // entityName reads the literal name in table("T"), external_table("T") or
 // materialized_view("T").
-func entityName(call *kql.CallExpression) (string, bool) {
-	name, ok := call.Function.(*kql.NameExpression)
-	if !ok || len(call.Args) != 1 {
-		return "", false
-	}
-	function := strings.ToLower(name.Name)
-	if function != "table" && function != "external_table" && function != "materialized_view" {
-		return "", false
-	}
-	literal, ok := call.Args[0].(*kql.LiteralExpression)
-	if !ok || literal.Kind != kql.StringToken {
-		return "", false
-	}
-	return stringLiteralValue(literal), true
-}
-
 // temporalRange lowers datetime and timespan ranges onto the numeric series:
 // timespans are ticks, and datetimes are offsets from the lower bound.
 func (s *compileState) temporalRange(name string, from, to, step boundExpr, span kql.Span) Relation {
