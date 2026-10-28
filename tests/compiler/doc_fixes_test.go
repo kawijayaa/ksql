@@ -436,3 +436,27 @@ func TestNullStringsAndDatetimeBetween(t *testing.T) {
 		t.Errorf("datetime between timespan: %v\n%s", result.Diagnostics, result.SQL)
 	}
 }
+
+// toscalar is computed once per query, even through a function called twice.
+func TestToScalarComputedOnce(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters(), ksql.WithTypedFunction("rand", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "random"}}, nil
+	}))
+	result := compiler.Compile(`let y = () { toscalar(rand()) }; print a = y, b = y, c = toscalar(rand()) | extend same = a == b and b == c`)
+	if !result.OK() {
+		t.Fatal(result.Diagnostics)
+	}
+	rows := queryRows(t, db, result)
+	if fmt.Sprint(rows[0][3]) != "1" {
+		t.Errorf("toscalar values differ: %v\n%s", rows, result.SQL)
+	}
+	distinct := compiler.Compile(`let f = (n:long) { toscalar(n * 2) }; print a = f(1), b = f(2)`)
+	if got := fmt.Sprint(queryRows(t, db, distinct)); got != `[[2 4]]` {
+		t.Errorf("toscalar with different arguments: %s", got)
+	}
+}

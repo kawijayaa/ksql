@@ -2,6 +2,7 @@ package ksql
 
 import (
 	"maps"
+	"reflect"
 
 	"github.com/kawijayaa/ksql/dialect"
 	"github.com/kawijayaa/ksql/kql"
@@ -108,6 +109,14 @@ func (s *compileState) toScalar(call *kql.CallExpression) boundExpr {
 		}
 		kind = value.Type
 		query = &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: value.SQL, Alias: "value"}}}
+	}
+	// Kusto computes a toscalar once per query: an identical scalar query,
+	// such as toscalar(rand(1000)) in a function called twice, shares its
+	// binding.
+	for _, binding := range s.queryBindings {
+		if existing, ok := binding.reference.(*sqlast.ScalarReference); ok && reflect.DeepEqual(binding.query, query) {
+			return boundExpr{SQL: existing, Type: kind}
+		}
 	}
 	reference := &sqlast.ScalarReference{}
 	if !s.addQueryBinding(reference, query, call.Span, "function.toscalar") {
