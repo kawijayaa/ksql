@@ -154,6 +154,8 @@ type UnionSpec struct {
 	Inputs []*Pipeline
 	// IsFuzzy skips operands that reference missing tables.
 	IsFuzzy bool
+	// WithSource names a column holding each row's source table.
+	WithSource string
 }
 type MvExpansion struct {
 	Name       string

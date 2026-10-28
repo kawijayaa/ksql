@@ -623,6 +623,8 @@ func parseUnion(op Operator, tokens []Token) (Operator, []ParseError) {
 	for position+2 < len(tokens) && tokens[position].Kind == IdentifierToken && tokens[position+1].Text == "=" {
 		if lower(tokens[position]) == "kind" {
 			spec.Kind = lower(tokens[position+2])
+		} else if (lower(tokens[position]) == "withsource" || lower(tokens[position]) == "with_source") && tokens[position+2].Kind == IdentifierToken {
+			spec.WithSource = tokens[position+2].Text
 		} else if lower(tokens[position]) == "isfuzzy" && (lower(tokens[position+2]) == "true" || lower(tokens[position+2]) == "false") {
 			spec.IsFuzzy = lower(tokens[position+2]) == "true"
 		} else {

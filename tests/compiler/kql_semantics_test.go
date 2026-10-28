@@ -94,3 +94,22 @@ func TestFuzzyUnionAndViews(t *testing.T) {
 		}
 	}
 }
+
+func TestUnionWithSource(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`union withsource=SourceTable Events, UAL | summarize n=count() by SourceTable | order by SourceTable asc`, `[[Events 2] [UAL 2]]`},
+		{`union withsource=T (Events | take 1), UAL | summarize n=count() by T | order by T asc`, `[[UAL 2] [union_arg0 1]]`},
+		{`union withsource=T isfuzzy=true Events, Missing | distinct T`, `[[Events]]`},
+		{`Events | union withsource=T UAL | summarize count() by T | order by T asc`, `[[UAL 2] [union_arg0 2]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s %#v", tc.query, got, tc.want, result.Diagnostics)
+		}
+	}
+	if result := compiler.Compile(`union withsource=Host Events, UAL`); result.OK() {
+		t.Fatal("withsource colliding with a column was accepted")
+	}
+}

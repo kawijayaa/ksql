@@ -16,8 +16,10 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		return Relation{}
 	}
 	var legs []Relation
+	var labels []string
 	if input.Query != nil {
 		legs = append(legs, input)
+		labels = append(labels, "union_arg0")
 	}
 	for _, pipeline := range spec.Inputs {
 		mark := len(s.diagnostics)
@@ -30,7 +32,13 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 			}
 			return Relation{}
 		}
+		// withsource reports a bare table's name, else union_argN.
+		label := fmt.Sprintf("union_arg%d", len(legs))
+		if len(pipeline.Operators) == 0 && pipeline.Source.Kind == "table" {
+			label = unquoteKQL(pipeline.Source.Name)
+		}
 		legs = append(legs, leg)
+		labels = append(labels, label)
 	}
 	if len(legs) == 0 {
 		s.bindError("KQLB0201", operator.Span, "operator.union", "union isfuzzy=true found no existing tables")
@@ -114,20 +122,33 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		}
 		schema.Columns = append(schema.Columns, Column{Name: name, Type: k.typ})
 	}
+	if spec.WithSource != "" {
+		name := unquoteKQL(spec.WithSource)
+		if used[strings.ToLower(name)] {
+			s.bindError("KQLB0321", operator.Span, "operator.union", "withsource column "+name+" collides with a union column")
+			return Relation{}
+		}
+		schema.Columns = append([]Column{{Name: name, Type: TypeString}}, schema.Columns...)
+	}
 	queries := make([]sqlast.Query, 0, len(legs))
-	for _, leg := range legs {
+	for legIndex, leg := range legs {
 		alias := s.nextAlias()
 		available := map[key]bool{}
 		for _, col := range leg.Schema.Columns {
 			available[key{col.Name, col.Type}] = true
 		}
-		items := make([]sqlast.SelectItem, 0, len(selected))
+		items := make([]sqlast.SelectItem, 0, len(selected)+1)
+		offset := 0
+		if spec.WithSource != "" {
+			items = append(items, sqlast.SelectItem{Expr: s.bind(labels[legIndex]), Alias: schema.Columns[0].Name})
+			offset = 1
+		}
 		for i, k := range selected {
 			var value sqlast.Expr = &sqlast.Literal{Kind: sqlast.NullLiteral}
 			if available[k] {
 				value = &sqlast.Identifier{Parts: []string{alias, k.name}}
 			}
-			items = append(items, sqlast.SelectItem{Expr: value, Alias: schema.Columns[i].Name})
+			items = append(items, sqlast.SelectItem{Expr: value, Alias: schema.Columns[i+offset].Name})
 		}
 		queries = append(queries, &sqlast.Select{From: &sqlast.Subquery{Query: leg.Query, Alias: alias}, Projections: items})
 	}
