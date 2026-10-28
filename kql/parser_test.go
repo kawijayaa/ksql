@@ -89,6 +89,17 @@ func TestParseDatatableAndRange(t *testing.T) {
 	}
 }
 
+func TestParseLetScalarRange(t *testing.T) {
+	script, errs := Parse("let x = range(1.0, 10, 1);\nlet T = range i from 1 to 3 step 1;\nprint x")
+	if len(errs) != 0 {
+		t.Fatalf("Parse() errors = %v", errs)
+	}
+	scalar, tabular := script.Statements[0].(*LetStatement), script.Statements[1].(*LetStatement)
+	if scalar.Value == nil || scalar.Pipeline != nil || tabular.Pipeline == nil {
+		t.Fatalf("let range forms = %#v / %#v", scalar, tabular)
+	}
+}
+
 func TestParseReportsUnknownOperator(t *testing.T) {
 	_, errs := Parse(`T | frobnicate a`)
 	if len(errs) != 1 || errs[0].Code != "KQLP0301" {

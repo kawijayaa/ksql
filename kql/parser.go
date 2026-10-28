@@ -803,7 +803,12 @@ func beginsTabularSource(tokens []Token) bool {
 	if len(tokens) == 0 {
 		return false
 	}
-	_, ok := sourceKeywords[lower(tokens[0])]
+	kind, ok := sourceKeywords[lower(tokens[0])]
+	// range(start, stop, step) is the scalar array function; the tabular
+	// operator always names its column first.
+	if kind == "range" && len(tokens) > 1 && tokens[1].Text == "(" {
+		return false
+	}
 	return ok
 }
 
