@@ -136,13 +136,17 @@ func (s *compileState) scan(input Relation, operator kql.Operator) Relation {
 	numbered := &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}, Projections: []sqlast.SelectItem{
 		{Expr: &sqlast.Star{}}, {Expr: ordinal, Alias: scanRowColumn},
 	}}
-	number := func(value int) sqlast.Expr { return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: fmt.Sprint(value)} }
+	number := func(value int) sqlast.Expr {
+		return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: fmt.Sprint(value)}
+	}
 	null := &sqlast.Literal{Kind: sqlast.NullLiteral}
 	col := func(alias, name string) sqlast.Expr { return &sqlast.Identifier{Parts: []string{alias, name}} }
 	isTrue := func(alias, name string) sqlast.Expr {
 		return &sqlast.Binary{Left: col(alias, name), Operator: "=", Right: number(1)}
 	}
-	and := func(left, right sqlast.Expr) sqlast.Expr { return &sqlast.Binary{Left: left, Operator: "AND", Right: right} }
+	and := func(left, right sqlast.Expr) sqlast.Expr {
+		return &sqlast.Binary{Left: left, Operator: "AND", Right: right}
+	}
 	not := func(value sqlast.Expr) sqlast.Expr { return &sqlast.Unary{Operator: "NOT ", Operand: value} }
 	flag := func(value sqlast.Expr) sqlast.Expr {
 		return &sqlast.Case{Branches: []sqlast.When{{Condition: value, Result: number(1)}}, Else: number(0)}
