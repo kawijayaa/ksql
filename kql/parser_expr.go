@@ -365,7 +365,13 @@ func (p *expressionParser) parseRangeList() Expression {
 		p.errors = append(p.errors, ParseError{Code: "KQLP0408", Message: "expected '..' in range", Span: open})
 	}
 	right := p.parse(0)
-	p.consume(")")
+	if !p.consume(")") {
+		p.errors = append(p.errors, ParseError{Code: "KQLP0408", Message: "range is missing its closing parenthesis", Span: open})
+	}
+	if left == nil || right == nil {
+		p.errors = append(p.errors, ParseError{Code: "KQLP0408", Message: "range requires lower and upper bounds", Span: open})
+		return nil
+	}
 	items := []Expression{left, right}
 	return &ListExpression{Items: items, Span: joinSpan(open, right.NodeSpan())}
 }
