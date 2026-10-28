@@ -86,6 +86,9 @@ func (s *compileState) pivot(input Relation, spec kql.EvaluateSpec, operator kql
 	if !found {
 		return fail("unknown pivot column " + pivotName.Name)
 	}
+	if pivotColumn.Type == TypeDynamic {
+		return fail("pivot columns cannot be dynamic")
+	}
 	aggregate := &kql.CallExpression{Function: &kql.NameExpression{Name: "count"}}
 	rest := spec.Args[1:]
 	if len(rest) > 0 {

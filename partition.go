@@ -138,7 +138,7 @@ func sameColumns(a, b Schema) bool {
 // order, failing when there are more than limit.
 func (s *compileState) discoverValues(input Relation, column string, limit int, span kql.Span, feature string) ([]any, bool) {
 	if s.compiler.values == nil {
-		s.error("KQLL0394", span, feature, "partition requires an application values resolver")
+		s.error("KQLL0394", span, feature, strings.TrimPrefix(feature, "operator.")+" requires an application values resolver")
 		return nil, false
 	}
 	materialized := false
@@ -149,7 +149,7 @@ func (s *compileState) discoverValues(input Relation, column string, limit int, 
 		return !materialized
 	})
 	if materialized || len(input.rowDependencies) != 0 || len(s.capturedRows) != 0 {
-		s.error("KQLL0394", span, feature, "partition over cached or correlated input is not supported")
+		s.error("KQLL0394", span, feature, strings.TrimPrefix(feature, "operator.")+" over cached or correlated input is not supported")
 		return nil, false
 	}
 	value := &sqlast.Identifier{Parts: []string{"ksql_partition", column}}
