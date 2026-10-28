@@ -254,6 +254,13 @@ func inferredName(expression kql.Expression, boundName string) string {
 		if len(value.Args) > 0 {
 			first = inferredName(value.Args[0], "")
 		}
+		// Kusto names covariance results after both arguments, a custom rule
+		// not expressed by ResultNameKind: covariance_x_y.
+		if strings.HasPrefix(name, "covariance") && len(value.Args) >= 2 {
+			if second := inferredName(value.Args[1], ""); first != "" && second != "" {
+				return rule.prefix + "_" + first + "_" + second
+			}
+		}
 		switch rule.kind {
 		case resultFirstArgument:
 			return first

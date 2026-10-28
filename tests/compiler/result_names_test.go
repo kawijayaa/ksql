@@ -21,7 +21,8 @@ func TestDefaultResultNames(t *testing.T) {
 		{`datatable(s:string)["a"] | extend tolower(s), strlen(s), tostring(s), iff(true, 1, 2), toupper(s)`, `s,Column1,strlen_s,Column2,Column3`},
 		// project keeps generated ColumnN names for unnamed calls; inferring
 		// them needs Kusto's numeric suffixes for colliding inferred names.
-		{`datatable(s:string)["a"] | project strlen(s), bin(strlen(s), 1)`, `Column1,Column2`},
+		{`datatable(s:string)["a"] | project strlen(s), bin(strlen(s), 1)`, `strlen_s,strlen_s1`},
+		{`datatable(s:string)["a"] | project strlen(s), tolower(s), s`, `strlen_s,Column1,s`},
 	} {
 		result := compiler.Compile(tc.query)
 		if !result.OK() {

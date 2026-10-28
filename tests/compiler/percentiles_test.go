@@ -22,7 +22,7 @@ func percentileCompiler() *ksql.Compiler {
 	return ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()),
 		ksql.WithTypedAggregate("percentile", rule("pct")), ksql.WithTypedAggregate("percentilew", rule("pctw")),
 		ksql.WithTypedAggregate("percentiles_array", rule("pcts")), ksql.WithTypedAggregate("hll_merge", rule("merge")),
-		ksql.WithScalarOverload("hll_merge", 2))
+		ksql.WithScalarOverload("hll_merge", 2), ksql.WithTypedAggregate("covariance", rule("cov")), ksql.WithTypedAggregate("covariancep", rule("covp")))
 }
 
 // percentiles expands to one named column per percentile; aggregates with a
@@ -35,6 +35,7 @@ func TestPercentileExpansionAndScalarOverloads(t *testing.T) {
 		{`UAL | summarize percentilesw(Host, 2, 10, 20)`, `percentile_Host_10 percentile_Host_20`, `pctw("Host", 2, 20)`},
 		{`UAL | summarize percentiles_array(Host, 1, 2)`, `percentiles_Host`, `pcts("Host", 1, 2)`},
 		{`UAL | summarize m = hll_merge(Host)`, `m`, `merge("Host")`},
+		{`UAL | summarize covariance(Host, User), covariancep(Host, User)`, `covariance_Host_User covariancep_Host_User`, `cov("Host", "User")`},
 		{`UAL | extend m = hll_merge(Host, User)`, `User Host m`, `merge("Host", "User")`},
 	} {
 		result := compiler.Compile(tc.query)

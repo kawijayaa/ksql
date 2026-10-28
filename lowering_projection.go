@@ -48,7 +48,9 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 		} else {
 			bound = s.expression(expression)
 			item.Expr = bound.SQL
-			if inferAlias {
+			// Computed expressions take Kusto's inferred names; plain columns
+			// are aliased only where the caller asks (summarize).
+			if _, column := expression.(*kql.NameExpression); inferAlias || !column {
 				item.Alias = inferredName(expression, bound.Name)
 			}
 			if printStyle {
@@ -73,6 +75,16 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 			if name == "" {
 				name = s.defaultColumnName(expression.NodeSpan(), false)
 				item.Alias = name
+				items[len(items)-1].Alias = name
+			}
+			// Kusto suffixes an unnamed column whose inferred name is already
+			// taken: x, x1, x2.
+			_, column := expression.(*kql.NameExpression)
+			if !column && containsColumn(schema.Columns, name) {
+				base := name
+				for suffix := 1; containsColumn(schema.Columns, name); suffix++ {
+					name = fmt.Sprintf("%s%d", base, suffix)
+				}
 				items[len(items)-1].Alias = name
 			}
 			schema.Columns = append(schema.Columns, Column{Name: name, Type: bound.Type})

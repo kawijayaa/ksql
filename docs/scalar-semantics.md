@@ -123,9 +123,10 @@ metadata in Kusto.Language, generated into `result_names.go`. For example,
 `sum(a)` is `sum_a`, `count()` is `count_`, `make_list(a)` is `list_a`,
 `bin(t, 1h)` is `t` and `strlen(s)` is `strlen_s`. Functions without a rule,
 such as `tolower` or `iff`, are unnamed, so `extend` generates `ColumnN`.
-`project` still names every unnamed call `ColumnN`; inferring names there
-requires Kusto's numeric suffixes for colliding inferred names, which remain
-open.
+`project` infers the same names; an inferred name that is already taken gets
+a numeric suffix (`strlen_s`, `strlen_s1`), while repeating a plain column or
+an explicit name is an error. `covariance(x, y)` and its variants are named
+after both arguments (`covariance_x_y`).
 
 ## Name resolution
 
