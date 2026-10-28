@@ -79,7 +79,7 @@ func (s *compileState) pipeline(pipeline *kql.Pipeline) (result Relation) {
 		if relation.Query == nil {
 			return Relation{}
 		}
-		relation = s.operator(relation, operator)
+		relation = s.serializedAfter(relation, s.operator(relation, operator), operator)
 		relation.rowDependencies = mergeRowDependencies(relation.rowDependencies, s.capturedRows)
 		delete(relation.rowDependencies, s.rowID)
 	}

@@ -54,6 +54,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		s.tabularLets[strings.ToLower(spec.Name)] = input
 		return input
 	}
+	if spec, ok := operator.Body.(kql.ExpressionSpec); ok && (operator.Kind == "extend" || operator.Kind == "project" || operator.Kind == "where" || operator.Kind == "serialize") && s.hasWindowCall(spec.Expressions) {
+		return s.windowOperator(input, operator, spec.Expressions)
+	}
 	from := &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}
 	previousInput := s.input
 	s.input = input.Schema
@@ -120,7 +123,7 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		for i, order := range spec.Expressions {
 			orders[i] = sqlast.Order{Expr: s.expression(order.Expression).SQL, Direction: order.Direction, Nulls: order.Nulls}
 		}
-		return Relation{Query: &sqlast.Select{From: from, OrderBy: orders}, Schema: input.Schema.Clone()}
+		return Relation{Query: &sqlast.Select{From: from, OrderBy: orders}, Schema: input.Schema.Clone(), serialized: true, order: orders}
 	case "take":
 		spec := operator.Body.(kql.ExpressionSpec)
 		if !s.validateLimit(spec.Expressions[0], operator) {
@@ -132,7 +135,8 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		if !s.validateLimit(spec.Count, operator) {
 			return Relation{}
 		}
-		return Relation{Query: &sqlast.Select{From: from, OrderBy: []sqlast.Order{{Expr: s.expression(spec.By.Expression).SQL, Direction: spec.By.Direction, Nulls: spec.By.Nulls}}, Limit: s.expression(spec.Count).SQL}, Schema: input.Schema.Clone()}
+		orders := []sqlast.Order{{Expr: s.expression(spec.By.Expression).SQL, Direction: spec.By.Direction, Nulls: spec.By.Nulls}}
+		return Relation{Query: &sqlast.Select{From: from, OrderBy: orders, Limit: s.expression(spec.Count).SQL}, Schema: input.Schema.Clone(), serialized: true, order: orders}
 	case "search":
 		return s.search(from, input.Schema, operator)
 	case "sample":
@@ -172,8 +176,16 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: column.SQL}}}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count).SQL}, Schema: Schema{Columns: []Column{{Name: column.Name, Type: column.Type}}}}
 	case "serialize":
-		s.warn("KQLL0301", operator.Span, feature, "serialize metadata is unnecessary in SQL; row order still requires an explicit sort")
-		return Relation{Query: &sqlast.Select{From: from}, Schema: input.Schema.Clone()}
+		order := input.order
+		if !input.serialized {
+			s.warn("KQLL0301", operator.Span, feature, "serialize freezes an arbitrary row order; sort first when the order matters")
+		}
+		if spec, ok := operator.Body.(kql.ExpressionSpec); ok && len(spec.Expressions) > 0 {
+			extended := s.extend(from, input.Schema, spec.Expressions, operator)
+			extended.serialized, extended.order = true, order
+			return extended
+		}
+		return Relation{Query: &sqlast.Select{From: from}, Schema: input.Schema.Clone(), serialized: true, order: order}
 	default:
 		s.error("KQLL0302", operator.Span, feature, operator.Kind+" is recognized but has no enabled lowering for "+s.compiler.dialect.Name())
 		return Relation{}

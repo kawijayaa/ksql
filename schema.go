@@ -78,6 +78,11 @@ type Relation struct {
 	Query           sqlast.Query
 	Schema          Schema
 	rowDependencies map[int]struct{}
+	// serialized marks a KQL serialized row set. order, when present, gives
+	// the row order as expressions over the relation's own columns; a
+	// serialized relation without order has an arbitrary frozen order.
+	serialized bool
+	order      []sqlast.Order
 }
 
 // Limits bounds syntax-driven compiler expansion. Zero means unlimited. These

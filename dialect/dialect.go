@@ -454,15 +454,18 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 				if direction != "" && direction != "ASC" && direction != "DESC" {
 					return "", fmt.Errorf("invalid window order direction %q", direction)
 				}
-				if order.Nulls != "" {
-					return "", fmt.Errorf("explicit window null ordering is not yet supported")
-				}
 				if direction != "" {
 					expression += " " + direction
+				}
+				if order.Nulls != "" && r.dialect.SupportsNullOrdering() {
+					expression += " NULLS " + strings.ToUpper(order.Nulls)
 				}
 				parts = append(parts, expression)
 			}
 			clauses = append(clauses, "ORDER BY "+strings.Join(parts, ", "))
+		}
+		if e.Cumulative {
+			clauses = append(clauses, "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW")
 		}
 		return call + " OVER (" + strings.Join(clauses, " ") + ")", nil
 	case *sqlast.List:

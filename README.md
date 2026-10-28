@@ -87,6 +87,8 @@ The built-in relational compiler currently lowers:
 - coherent `take_any` / `take_anyif` and deprecated aliases, with tuple/wildcard
   results, presence preference and conditional eligibility
 - `count`, `sort`/`order`, `take`/`limit`, and `top`
+- [window functions](docs/window-functions.md) `prev`, `next`, `row_number`,
+  `row_cumsum`, `row_rank_dense` and `row_rank_min` over serialized row sets
 - `sample`, `sample-distinct`, and reusable pipeline aliases with `as`
 - `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`
   joins where supported by the selected database; bound joins emit explicit,
@@ -144,6 +146,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Typed query parameter declarations](docs/query-parameters.md)
 - [String parsing with `parse` and `parse-where`](docs/parse-operator.md)
 - [Key-value extraction with `parse-kv`](docs/parse-kv-operator.md)
+- [Window functions and serialization](docs/window-functions.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)
 - [Feature ledger](features/README.md)

@@ -50,6 +50,10 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		}
 		return boundExpr{SQL: &sqlast.Literal{Kind: kind, Value: text}, Type: resultType}
 	}
+	if _, _, window := s.isWindowCall(value); window {
+		s.bindError("KQLB0391", value.Span, "function."+function, function+" is a window function; use it in extend, project, serialize or where over a serialized row set")
+		return boundExpr{}
+	}
 	if s.isAggregate(function) {
 		if !s.aggregationAllowed {
 			s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")

@@ -10,7 +10,8 @@ positioned diagnostic and no partial SQL.
 | `summarize` core aggregates | Yes | Yes | Yes with catalog | Yes | SQLite core; renderer tests elsewhere | Equivalent subject to database null/numeric behavior |
 | `make_list` | Yes | Yes | Yes | Yes | SQLite; PostgreSQL rendering | Lossy: result order is arbitrary without an explicit database order |
 | `getschema` | Yes | Operator | Bound schema | Inline value table | SQLite; renderer tests elsewhere | Standard four-column schema; rejects unknown types and unsupported parameters |
-| `sort`, `top`, `take`, `count` | Yes | Yes | Yes | Yes | SQLite and renderer tests | Equivalent; configured constant row bounds are enforced |
+| `sort`, `top`, `take`, `count` | Yes | Yes | Yes | Yes | SQLite and renderer tests | Equivalent; configured constant row bounds are enforced; `sort` and `top` record serialization |
+| `serialize`, window functions | Yes | Expression list | Bound schema | Hidden ordinal and `LAG`/`LEAD`/`ROW_NUMBER`/cumulative windows | SQLite | `prev`, `next`, `row_number`, `row_cumsum`, `row_rank_dense`, `row_rank_min` with restarts; see [window guide](window-functions.md) |
 | `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Exact names and case-sensitive `*` patterns; input column order retained |
 | `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
 | `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Exact names and `*` patterns; ordinal and natural numeric sorting; first match wins; unspecified columns retain input order |

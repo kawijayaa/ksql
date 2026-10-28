@@ -150,6 +150,9 @@ type Window struct {
 	Expr        Expr
 	PartitionBy []Expr
 	OrderBy     []Order
+	// Cumulative frames the window from the partition start to the current
+	// row, so ordering ties never aggregate peer rows.
+	Cumulative bool
 }
 type List struct{ Items []Expr }
 type Case struct {
