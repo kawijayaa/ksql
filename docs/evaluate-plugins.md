@@ -17,13 +17,4 @@ Besides `bag_unpack` (see bag-unpack.md), `evaluate` supports:
   / `ipv6_is_in_range`, plus equal extra keys; `return_unmatched = true`
   keeps unmatched rows with null lookup columns.
 
-- `geo_polygon_lookup(LookupTable, PolygonKey, Longitude, Latitude [, radius] [, return_unmatched] [, lookup_area_radius] [, return_lookup_key])`:
-  a lookup join on the application's `geo_point_in_polygon`, or on
-  `geo_distance_point_to_polygon` within `radius` meters.
-- `geo_line_lookup(LookupTable, LineKey, Longitude, Latitude, Radius [, ...])`:
-  a lookup join on `geo_distance_point_to_line` within `Radius` meters.
-  For both, options may be positional or named; `lookup_area_radius` is a
-  performance hint and is ignored, and the key column is dropped unless
-  `return_lookup_key = true`.
-
 Other plugins report `KQLL0391`.

@@ -157,7 +157,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Percentile columns and scalar overloads](docs/percentiles.md)
 - [Partitioned subqueries with `partition`](docs/partition.md)
 - [Pattern statements](docs/patterns.md)
-- [evaluate plugins: narrow, pivot, IP and geo lookups](docs/evaluate-plugins.md)
+- [evaluate plugins: narrow, pivot and IP lookups](docs/evaluate-plugins.md)
 - [Visualization annotations with `render`](docs/render-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)

@@ -45,10 +45,7 @@ func (s *compileState) evaluate(input Relation, operator kql.Operator) Relation 
 		return s.ipLookup(input, spec, feature, "ipv4_is_in_range")
 	case "ipv6_lookup":
 		return s.ipLookup(input, spec, feature, "ipv6_is_in_range")
-	case "geo_polygon_lookup":
-		return s.geoLookup(input, spec, feature, false)
-	case "geo_line_lookup":
-		return s.geoLookup(input, spec, feature, true)
+
 	}
 	s.error("KQLL0391", operator.Span, feature, "evaluate plugin "+spec.Plugin+" is not supported by SQL lowering")
 	return Relation{}
