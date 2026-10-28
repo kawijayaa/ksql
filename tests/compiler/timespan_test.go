@@ -98,3 +98,27 @@ func TestTimespanSemantics(t *testing.T) {
 		t.Fatalf("missing capability: %#v", result.Diagnostics)
 	}
 }
+
+func TestTimespanExportedHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		text      string
+		ticks     int64
+		formatted string
+	}{
+		{"1d", 864000000000, "1.00:00:00"}, {"-90s", -900000000, "-00:01:30"}, {"1tick", 1, "00:00:00.0000001"},
+		{"1.02:03:04.5", 937845000000, "1.02:03:04.5000000"}, {"0", 0, "00:00:00"},
+	} {
+		ticks, ok := ksql.ParseTimespan(tc.text)
+		if !ok || ticks != tc.ticks || ksql.FormatTimespan(ticks) != tc.formatted {
+			t.Fatalf("%s: %d %v %s", tc.text, ticks, ok, ksql.FormatTimespan(ticks))
+		}
+	}
+	if got := ksql.FormatTimespan(-9223372036854775808); got != "-10675199.02:48:05.4775808" {
+		t.Fatalf("minimum ticks = %s", got)
+	}
+	for _, text := range []string{"", "x", "1x", "25:00", "1.2.3", "99999999999999999999d"} {
+		if _, ok := ksql.ParseTimespan(text); ok {
+			t.Fatalf("%q accepted", text)
+		}
+	}
+}

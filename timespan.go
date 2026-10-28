@@ -1,8 +1,10 @@
 package ksql
 
 import (
+	"fmt"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/kawijayaa/ksql/kql"
@@ -181,4 +183,28 @@ func (s *compileState) temporalArithmetic(op string, left, right boundExpr, span
 		return boundExpr{SQL: product, Type: TypeTimespan}, true
 	}
 	return invalid()
+}
+
+// ParseTimespan parses KQL timespan text (1.5h, 10ms, [-][d.]hh:mm[:ss[.f]]
+// or a number of days) into 100-nanosecond ticks, for application runtimes
+// that implement totimespan over the compiler's representation.
+func ParseTimespan(text string) (int64, bool) { return timespanTicks(text) }
+
+// FormatTimespan renders ticks as [-][d.]hh:mm:ss[.fffffff].
+func FormatTimespan(ticks int64) string {
+	sign := ""
+	magnitude := uint64(ticks)
+	if ticks < 0 {
+		sign, magnitude = "-", uint64(-ticks)
+	}
+	days := magnitude / ticksPerDay
+	text := sign
+	if days > 0 {
+		text += strconv.FormatUint(days, 10) + "."
+	}
+	text += fmt.Sprintf("%02d:%02d:%02d", magnitude/36000000000%24, magnitude/600000000%60, magnitude/10000000%60)
+	if fraction := magnitude % 10000000; fraction != 0 {
+		text += fmt.Sprintf(".%07d", fraction)
+	}
+	return text
 }
