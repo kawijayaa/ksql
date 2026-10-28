@@ -30,3 +30,12 @@ func TestDocumentedConversionAndMembership(t *testing.T) {
 		t.Fatalf("log must be natural: %s", result.SQL)
 	}
 }
+
+func TestMakeListEncodesElementsAsTyped(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	result := compiler.Compile(`datatable(d:dynamic, b:bool, t:long)[dynamic({"a":1}), true, 1, dynamic([2]), false, 2, dynamic(null), bool(null), 3] | summarize ds=make_list(d), bs=make_list(b), ts=make_list(t * 1s)`)
+	if got := fmt.Sprint(queryRows(t, db, result)); got != `[[[{"a":1},[2]] [true,false] ["00:00:01","00:00:02","00:00:03"]]]` {
+		t.Fatalf("rows = %s; SQL=%s", got, result.SQL)
+	}
+}

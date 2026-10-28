@@ -324,7 +324,11 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 			s.error("KQLL0503", value.Span, "aggregate.make_list", "make_list requires an explicit dialect mapping")
 			return boundExpr{}
 		}
-		call := &sqlast.Call{Name: name, Args: args}
+		element := args[0]
+		if name == "json_group_array" {
+			element = sqliteJSONElement(args[0], argTypes[0])
+		}
+		call := &sqlast.Call{Name: name, Args: []sqlast.Expr{element}}
 		return boundExpr{SQL: &sqlast.Filtered{Expr: call, Where: &sqlast.Binary{Left: args[0], Operator: "IS NOT", Right: &sqlast.Literal{Kind: sqlast.NullLiteral}}}, Type: TypeDynamic}
 	case "dcount":
 		s.error("KQLL0510", value.Span, "aggregate.dcount", "dcount is approximate in KQL and requires an explicit compatible aggregate mapping")
@@ -397,4 +401,21 @@ func textOf(value sqlast.Expr, kind ScalarType) sqlast.Expr {
 		}}
 	}
 	return &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{text, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}
+}
+
+// sqliteJSONElement encodes a value for json_group_array: dynamic JSON text is
+// embedded as JSON rather than a string, Booleans as true/false and timespans
+// as Kusto text.
+func sqliteJSONElement(value sqlast.Expr, kind ScalarType) sqlast.Expr {
+	switch kind {
+	case TypeDynamic:
+		return &sqlast.Case{Branches: []sqlast.When{{Condition: &sqlast.Call{Name: "json_valid", Args: []sqlast.Expr{value}}, Result: &sqlast.Call{Name: "json", Args: []sqlast.Expr{value}}}}, Else: value}
+	case TypeBool:
+		return &sqlast.Case{Branches: []sqlast.When{
+			{Condition: value, Result: &sqlast.Call{Name: "json", Args: []sqlast.Expr{&sqlast.Literal{Kind: sqlast.StringLiteral, Value: "true"}}}},
+		}, Else: &sqlast.Call{Name: "json", Args: []sqlast.Expr{&sqlast.Literal{Kind: sqlast.StringLiteral, Value: "false"}}}}
+	case TypeTimespan:
+		return &sqlast.TimespanText{Value: value}
+	}
+	return value
 }
