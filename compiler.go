@@ -21,6 +21,7 @@ type Compiler struct {
 	parameterization   ParameterizationMode
 	limits             Limits
 	management         *ManagementCatalog
+	parameters         *queryParameterValues
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
@@ -65,6 +66,9 @@ func (r Result) OK() bool {
 
 // Compile parses and translates source. The method never emits partial SQL.
 func (c *Compiler) Compile(source string) Result {
+	if c.parameters != nil && c.parameters.err != "" {
+		return Result{Diagnostics: []Diagnostic{{Code: "KQLB0130", Severity: SeverityError, Phase: PhaseBind, Message: c.parameters.err, Span: kql.Span{Line: 1, Column: 1}, Feature: "statement.query_parameters"}}}
+	}
 	if c.limits.MaxSourceBytes > 0 && len(source) > c.limits.MaxSourceBytes {
 		return Result{Diagnostics: []Diagnostic{{Code: "KQLB0001", Severity: SeverityError, Phase: PhaseBind, Message: fmt.Sprintf("query exceeds MaxSourceBytes (%d)", c.limits.MaxSourceBytes), Span: kql.Span{Offset: 0, Length: len(source), Line: 1, Column: 1}}}}
 	}
@@ -88,6 +92,8 @@ func (c *Compiler) Compile(source string) Result {
 			state.bindLet(node, nil)
 		case *kql.ControlStatement:
 			state.error("KQLL0102", node.Span, "statement."+node.Kind, node.Kind+" is a KQL session/control statement with no SQL query equivalent")
+		case *kql.QueryParametersStatement:
+			state.bindQueryParameters(node)
 		case *kql.ExpressionStatement:
 			if relation.Query != nil {
 				state.error("KQLL0103", node.Span, "statement.expression", "multiple result-producing statements cannot be represented by one SQL query")

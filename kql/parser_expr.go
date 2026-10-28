@@ -188,6 +188,38 @@ func (p *expressionParser) parsePrefix() Expression {
 			end = p.tokens[p.position-1].Span
 		}
 		expr = &DynamicExpression{Tokens: body, Span: joinSpan(token.Span, end)}
+	case token.Kind == IdentifierToken && temporalLiteralName(token.Text) && p.position+1 < len(p.tokens) && p.tokens[p.position+1].Text == "(":
+		open := p.position + 1
+		close := matchingClose(p.tokens, open)
+		if close < 0 || close == open+1 {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0404", Message: "temporal literal requires one balanced value", Span: token.Span})
+			return nil
+		}
+		content := p.tokens[open+1 : close]
+		var argument Expression
+		if len(content) == 1 && strings.EqualFold(content[0].Text, "null") {
+			argument = &LiteralExpression{Kind: content[0].Kind, Text: "null", Span: content[0].Span}
+		} else if content[0].Kind == StringToken {
+			var errs []ParseError
+			argument, errs = parseExpressionTokens(content)
+			if _, ok := argument.(*LiteralExpression); !ok || len(errs) > 0 {
+				p.errors = append(p.errors, ParseError{Code: "KQLP0405", Message: "temporal literal requires a literal value", Span: tokensSpan(content)})
+				return nil
+			}
+		} else {
+			// ISO dates contain minus signs and colons. Their payload is literal
+			// text, not subtraction or a caller expression. Keep lexical gaps.
+			var text strings.Builder
+			for i, current := range content {
+				if i > 0 && current.Span.Offset > content[i-1].Span.Offset+content[i-1].Span.Length {
+					text.WriteByte(' ')
+				}
+				text.WriteString(current.Text)
+			}
+			argument = &LiteralExpression{Kind: StringToken, Text: strconv.Quote(text.String()), Span: tokensSpan(content)}
+		}
+		expr = &CallExpression{Function: &NameExpression{Name: token.Text, Span: token.Span}, Args: []Expression{argument}, Span: joinSpan(token.Span, p.tokens[close].Span)}
+		p.position = close + 1
 	case token.Kind == IdentifierToken:
 		p.position++
 		expr = &NameExpression{Name: token.Text, Span: token.Span}
@@ -373,4 +405,12 @@ func joinSpan(first, last Span) Span {
 		return last
 	}
 	return Span{Offset: first.Offset, Length: last.Offset + last.Length - first.Offset, Line: first.Line, Column: first.Column}
+}
+
+func temporalLiteralName(name string) bool {
+	switch strings.ToLower(name) {
+	case "datetime", "date", "timespan", "time":
+		return true
+	}
+	return false
 }

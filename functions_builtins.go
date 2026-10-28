@@ -29,6 +29,13 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		if len(value.Args) != 1 {
 			return s.arity(value, function, 1)
 		}
+		if literal, ok := value.Args[0].(*kql.LiteralExpression); ok && literal.Kind != kql.StringToken && strings.EqualFold(literal.Text, "null") {
+			kind := TypeUnknown
+			if function == "datetime" || function == "date" {
+				kind = TypeDateTime
+			}
+			return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: kind}
+		}
 		text := expressionText(value.Args[0])
 		if s.compiler.parameterization == BoundParameters {
 			resultType := TypeUnknown

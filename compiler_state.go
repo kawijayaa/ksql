@@ -11,6 +11,7 @@ import (
 
 type compileState struct {
 	compiler               *Compiler
+	queryParameterCount    int
 	managementAllowed      bool
 	pipelineDepth          int
 	scalarLets             map[string]boundExpr

@@ -66,6 +66,15 @@ type ControlStatement struct {
 	Span Span
 }
 
+// QueryParametersStatement declares request-supplied scalar values.
+type QueryParametersStatement struct {
+	Parameters []FunctionParameter
+	Span       Span
+}
+
+func (*QueryParametersStatement) statementNode()   {}
+func (s *QueryParametersStatement) NodeSpan() Span { return s.Span }
+
 func (*ControlStatement) statementNode()   {}
 func (s *ControlStatement) NodeSpan() Span { return s.Span }
 

@@ -96,6 +96,10 @@ func TestQueryFunctionExpansionLimits(t *testing.T) {
 
 func FuzzQueryFunctions(f *testing.F) {
 	for _, source := range []string{
+		`declare query_parameters(n:long=3);print n`,
+		`declare query_parameters(d:datetime=datetime(2026-01-02T03:04:05Z));print d`,
+		`declare query_parameters(x:long=);print x`,
+		`declare query_parameters(x:dynamic=dynamic({"x":1}));print x`,
 		`let f=(x:long){x+1}; print f(2)`,
 		`let f=(x:long){x}; print f(x=)`,
 		`let f=(x:long){let g=(){x}; g()}; print f(2)`,

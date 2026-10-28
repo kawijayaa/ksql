@@ -74,7 +74,12 @@ func parseStatement(tokens []Token) (Statement, []ParseError) {
 	switch first {
 	case "let":
 		return parseLet(tokens)
-	case "alias", "declare", "restrict", "set":
+	case "declare":
+		if len(tokens) > 1 && lower(tokens[1]) == "query_parameters" {
+			return parseQueryParameters(tokens)
+		}
+		return &ControlStatement{Kind: first, Raw: tokens, Span: span}, nil
+	case "alias", "restrict", "set":
 		return &ControlStatement{Kind: first, Raw: tokens, Span: span}, nil
 	default:
 		pipeline, errs := parsePipeline(tokens)

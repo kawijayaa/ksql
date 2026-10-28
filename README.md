@@ -138,6 +138,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Native Kusto query and management service client](docs/native-kusto.md)
 - [Operator support and dialect limits](docs/operator-support.md)
 - [Scalar and tabular query-defined functions](docs/query-functions.md)
+- [Typed query parameter declarations](docs/query-parameters.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)
 - [Feature ledger](features/README.md)
