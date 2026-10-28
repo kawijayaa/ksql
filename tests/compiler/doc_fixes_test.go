@@ -166,6 +166,7 @@ func TestSQLiteExecScan(t *testing.T) {
 		{`range x from 1 to 3 step 1 | scan with (step s1: true => x = 1;)`, "KQLB0360"},
 		{`range x from 1 to 3 step 1 | scan with (step s1: s1.nope > 1;)`, "KQLB0360"},
 		{`range x from 1 to 3 step 1 | scan with (step s1 output=some: true;)`, "KQLP0359"},
+		{`range x from 1 to 3 step 1 | scan declare (c:long) with (step s1: true => c = nope; step s2: true => c = nope;)`, "KQLB0401"},
 	} {
 		result := compiler.Compile(tc.query)
 		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {

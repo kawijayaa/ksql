@@ -181,7 +181,7 @@ func (s *compileState) scan(input Relation, operator kql.Operator) Relation {
 	bindings := map[kql.Expression]boundExpr{}
 	bind := func(expression kql.Expression) (boundExpr, bool) {
 		if bound, ok := bindings[expression]; ok {
-			return bound, true
+			return bound, bound.SQL != nil
 		}
 		previousInput, previousQualifier := s.input, s.qualifier
 		s.input, s.qualifier = synthetic, ""
@@ -483,6 +483,9 @@ var sqlExprType = reflect.TypeOf((*sqlast.Expr)(nil)).Elem()
 // substituteIdentifiers returns a copy of expr whose single-part
 // identifiers are replaced where replace reports a substitute.
 func substituteIdentifiers(expr sqlast.Expr, replace func(string) (sqlast.Expr, bool)) sqlast.Expr {
+	if expr == nil {
+		return nil
+	}
 	var copyValue func(reflect.Value) reflect.Value
 	copyValue = func(value reflect.Value) reflect.Value {
 		switch value.Kind() {
