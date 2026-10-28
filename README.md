@@ -152,6 +152,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Timespans and datetime arithmetic](docs/timespans.md)
 - [Unpacking property bags with `evaluate bag_unpack`](docs/bag-unpack.md)
 - [Time series with `make-series`](docs/make-series.md)
+- [Constant column selection with `project-by-names`](docs/project-by-names.md)
 - [Visualization annotations with `render`](docs/render-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)

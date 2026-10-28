@@ -25,6 +25,9 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
+	if function == "column_names_of" {
+		return s.columnNamesOf(value)
+	}
 	if function == "string" || function == "guid" {
 		// string(null) and guid(null) are typed null literals.
 		if len(value.Args) == 1 {

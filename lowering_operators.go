@@ -95,6 +95,8 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		return s.extend(from, input.Schema, spec.Expressions, operator)
 	case "project-away", "project-keep", "project-rename", "project-reorder":
 		return s.projectionOperator(from, input.Schema, operator)
+	case "project-by-names":
+		return s.projectByNames(from, input.Schema, operator)
 	case "summarize":
 		spec := operator.Body.(kql.SummarizeSpec)
 		if s.hasRowSelection(spec.Aggregates) {
