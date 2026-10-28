@@ -111,6 +111,7 @@ func initEntries() {
 		setSupport("operator.scalar.add operator.scalar.subtract operator.scalar.multiply operator.scalar.divide operator.scalar.modulo", Validated, Equivalent, "numeric arithmetic plus typed timespan (ticks) and datetime overloads through a dialect datetime capability; see docs/timespans.md")
 		setSupport("plugin.bag_unpack", Validated, Equivalent, "output schemas, or data-driven slots through an application key resolver; prefix, columnsConflict and ignoredProperties; see docs/bag-unpack.md")
 		setSupport("operator.evaluate", Validated, Equivalent, "bag_unpack only; other plugins return KQLL0391")
+		setSupport("operator.partition", Validated, Equivalent, "per-key UNION ALL branches over values discovered with an application ValuesResolver; legacy (64 keys, own-source bodies), native and shuffle (1024 keys); see docs/partition.md")
 		setSupport("function.pack_all", Validated, Equivalent, "packs the input schema through the application's bag_pack, omitting null/empty columns with ignore_null_empty; see docs/search.md")
 		setSupport("source.find", Validated, Equivalent, "find over listed tables and patterns with withsource, project-smart and project lists, and pack_ through the application's bag functions; typed column splitting remains incomplete; see docs/search.md")
 		setSupport("operator.project-by-names function.column_names_of", Validated, Equivalent, "compile-time constant names, dynamic name arrays, * patterns and column_names_of(T); unmatched names are ignored; see docs/project-by-names.md")

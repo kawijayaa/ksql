@@ -42,6 +42,11 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return s.makeSeries(input, operator)
 		}
 	}
+	if operator.Kind == "partition" {
+		if _, ok := operator.Body.(kql.PartitionSpec); ok {
+			return s.partition(input, operator)
+		}
+	}
 	if operator.Kind == "evaluate" {
 		if _, ok := operator.Body.(kql.EvaluateSpec); ok {
 			return s.evaluate(input, operator)

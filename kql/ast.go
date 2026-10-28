@@ -188,6 +188,19 @@ type SampleDistinctSpec struct {
 }
 
 // SearchSpec contains the scalar term searched across the visible schema.
+// PartitionSpec is partition [hint.strategy=S] by Column (SubQuery) or, for
+// the legacy strategy, by Column { SubQueryWithSource }. Body applies to each
+// partition's rows; WithSource marks a body with its own source, which sees
+// Column as the partition's key value.
+type PartitionSpec struct {
+	Strategy   string
+	Key        string
+	Body       *Pipeline
+	WithSource bool
+}
+
+func (PartitionSpec) operatorBody() {}
+
 // FindSpec is find [withsource=Column] [in (Tables)] where Predicate
 // [project-smart | project Column[:Type], ... [, pack_all()]].
 type FindSpec struct {
