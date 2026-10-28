@@ -38,8 +38,13 @@ final column consumes the rest of the value.
 | String constant | Quoted literal | RE2 expression, grouped `(?:...)` | Quoted literal |
 | `*` | `.*?` | `.*?` | `.*?` |
 | `string` and other non-numeric columns | `(.*?)` | `(.*)` | `(.*?)` |
-| `int`, `long` | `(\-?\d+)` | `(\-?\d+)` | `(.*?)` |
-| `real`, `double`, `decimal` | Signed decimal or exponent number | Same | `(.*?)` |
+| `int`, `long` | `(\-?\d+)` | `(\-?\d+)` | `(\-?\d+\|.*?)` |
+| `real`, `double`, `decimal` | Signed decimal or exponent number | Same | Number, else `.*?` |
+
+Relaxed numeric columns try a number first and fall back to lazy text. A
+non-numeric value then fails only its own conversion, while a number followed
+by `*` still captures the whole number. This reproduces both of Microsoft's
+relaxed examples; the engine's exact relaxed expression is not published.
 
 Regex constants may contain their own capture groups. They are counted with
 Go's RE2 parser, so later columns still read the correct group. `flags` are

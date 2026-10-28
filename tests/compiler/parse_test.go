@@ -137,6 +137,12 @@ func TestParseOperatorExecution(t *testing.T) {
 			{`datatable(EventText:string)["a=1\nb=2"] | parse kind=regex EventText with "a=" a:long ".b=" b:long | project a, b`, `[[<nil> <nil>]]`, `long long`},
 			// Relaxed mode nulls only failed conversions; simple mode nulls every column.
 			{`datatable(s:string)["n=bad, m=5, t=nonValidDateTime, u=x"] | parse kind=relaxed s with "n=" n:long ", m=" m:long ", t=" t:datetime ", u=" u | project n, m, t, u`, `[[<nil> 5 <nil> x]]`, `long long datetime string`},
+			// Microsoft's relaxed example: numbers before * still match.
+			{parseTraces + `Traces | parse kind=relaxed EventText with * "resourceName=" resourceName ", totalSlices=" totalSlices: long ", sliceNumber=" sliceNumber: long * "lockTime=" lockTime ", releaseTime=" releaseTime: date "," * "previousLockTime=" previousLockTime: date ")" * | project totalSlices, sliceNumber, releaseTime`,
+				`[[27 23 2016-02-17T08:40:01Z] [27 15 2016-02-17T08:40:00Z]]`, `long long datetime`},
+			{`datatable(s:string)["Event (totalSlices=nonValidLongValue, sliceNumber=20, releaseTime=nonValidDateTime 08:40:01, x)"] | parse kind=relaxed s with * "totalSlices=" totalSlices: long ", sliceNumber=" sliceNumber: long * "releaseTime=" releaseTime: date "," * | project totalSlices, sliceNumber, releaseTime`,
+				`[[<nil> 20 <nil>]]`, `long long datetime`},
+			{`datatable(s:string)["x=12abc, y=3.5z;"] | parse kind=relaxed s with "x=" x:long ", y=" y:real ";" | project x, y`, `[[<nil> <nil>]]`, `long real`},
 			{`datatable(s:string)["n=7, m=5, t=nonValidDateTime, u=x"] | parse s with "n=" n:long ", m=" m:long ", t=" t:datetime ", u=" u | project n, m, t, u`, `[[<nil> <nil> <nil> <nil>]]`, `long long datetime string`},
 			{`datatable(s:string)["n=bad, m=5"] | parse s with "n=" n:long ", m=" m:long | project n, m`, `[[<nil> <nil>]]`, `long long`},
 			// Unmatched rows are retained with null columns; the match is anchored.

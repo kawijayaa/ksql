@@ -93,11 +93,20 @@ func (s *compileState) parseRegex(spec kql.ParseSpec, feature string) (string, [
 			seen[key] = struct{}{}
 			group++
 			columns = append(columns, parseColumn{name: name, conversion: conversion, group: group, span: item.Span})
+			// Relaxed numeric columns prefer a number but fall back to any
+			// text, which then fails conversion alone instead of the match.
+			numeric := ""
+			switch conversion {
+			case "toint", "tolong":
+				numeric = parseIntegerPattern
+			case "toreal", "todecimal":
+				numeric = parseRealPattern
+			}
 			switch {
-			case spec.Kind != "relaxed" && (conversion == "toint" || conversion == "tolong"):
-				pattern.WriteString(parseIntegerPattern)
-			case spec.Kind != "relaxed" && (conversion == "toreal" || conversion == "todecimal"):
-				pattern.WriteString(parseRealPattern)
+			case numeric != "" && spec.Kind == "relaxed":
+				pattern.WriteString("(" + numeric[1:len(numeric)-1] + "|.*?)")
+			case numeric != "":
+				pattern.WriteString(numeric)
 			case spec.Kind == "regex":
 				pattern.WriteString(`(.*)`)
 			default:
