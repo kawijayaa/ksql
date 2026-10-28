@@ -402,3 +402,37 @@ func TestColumnFunctionsAndTableReferences(t *testing.T) {
 		}
 	}
 }
+
+// Kusto strings are never null, and between (datetime .. timespan) spans
+// Start to Start + Span.
+func TestNullStringsAndDatetimeBetween(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	data := `datatable(s:string)["a", "", "b"] | extend n = iff(s == "a", string(null), s)`
+	for _, tc := range []struct{ query, want string }{
+		{data + ` | where n != "b" | count`, `[[2]]`},
+		{data + ` | where n == "" | count`, `[[2]]`},
+		{data + ` | where n !in ("b") | count`, `[[2]]`},
+		{data + ` | where n in ("") | count`, `[[2]]`},
+		{data + ` | where n =~ "" | count`, `[[2]]`},
+		{data + ` | where n == "b" | count`, `[[1]]`},
+		{data + ` | where n == s | count`, `[[2]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.query, got, tc.want)
+		}
+	}
+	timed := ksql.New(dialect.SQLite(dialect.WithDatetimeArithmeticFunctions("test_dt_add", "test_dt_diff")))
+	result := timed.Compile(`print datetime(2020-01-02) between (datetime(2020-01-01) .. 1d)`)
+	if !result.OK() || !strings.Contains(strings.ToLower(result.SQL), "test_dt_add") {
+		t.Errorf("datetime between timespan: %v\n%s", result.Diagnostics, result.SQL)
+	}
+}

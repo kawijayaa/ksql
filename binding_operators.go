@@ -3,6 +3,7 @@ package ksql
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -46,7 +47,7 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		}
 		right = boundExpr{SQL: &sqlast.List{Items: items}, Type: TypeDynamic}
 	} else if !isTermOperator(op) {
-		right = s.expression(value.Right)
+		right = s.expression(s.betweenBounds(op, value.Right))
 	}
 	if expanded, ok := s.dynamicMembership(op, left, members); ok {
 		return expanded
@@ -86,6 +87,9 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		}
 		return boolean(&sqlast.Binary{Left: right.SQL, Operator: operator, Right: left.SQL})
 	}
+	if result, ok := s.stringEquality(op, left, right); ok {
+		return boolean(result)
+	}
 	switch op {
 	case "==":
 		op = "="
@@ -98,8 +102,13 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		if op == "!~" {
 			comparison = "<>"
 		}
-		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left.SQL}}, Operator: comparison, Right: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{right.SQL}}})
+		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{kustoString(left)}}, Operator: comparison, Right: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{kustoString(right)}}})
 	case "in", "!in":
+		// A Kusto string is never null: a null string is "", which !in
+		// lists without "" contain, and in lists with "" contain.
+		if list, ok := right.SQL.(*sqlast.List); ok && left.Type == TypeString && (op == "!in" || s.containsEmptyString(list.Items)) {
+			left.SQL = emptyIfNull(left.SQL)
+		}
 		if op == "!in" {
 			op = "NOT IN"
 		} else {
@@ -119,7 +128,7 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		if op == "!in~" {
 			operator = "NOT IN"
 		}
-		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{left.SQL}}, Operator: operator, Right: &sqlast.List{Items: items}})
+		return boolean(&sqlast.Binary{Left: &sqlast.Call{Name: "lower", Args: []sqlast.Expr{kustoString(left)}}, Operator: operator, Right: &sqlast.List{Items: items}})
 	case "between", "!between":
 		list, ok := right.SQL.(*sqlast.List)
 		if !ok || len(list.Items) != 2 {
@@ -215,11 +224,15 @@ func isNullExpression(expression sqlast.Expr) bool {
 }
 
 func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expression, mode string, caseSensitive, negative bool) (sqlast.Expr, bool) {
-	literal, ok := expression.(*kql.LiteralExpression)
-	if !ok || literal.Kind != kql.StringToken {
-		return nil, false
+	var term string
+	span := expression.NodeSpan()
+	if literal, ok := expression.(*kql.LiteralExpression); ok && literal.Kind == kql.StringToken {
+		term = stringLiteralValue(literal)
+	} else if constant, ok := s.constantString(expression); ok {
+		term = constant
+	} else {
+		return s.runtimeTermMatch(left, expression, mode, caseSensitive, negative)
 	}
-	term := stringLiteralValue(literal)
 	if term == "" {
 		return nil, false
 	}
@@ -235,7 +248,7 @@ func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expr
 		pattern = leftBoundary + `[[:alnum:]]*` + quoted + rightBoundary
 	}
 	if limit := s.compiler.limits.MaxRegexBytes; limit > 0 && len(pattern) > limit {
-		s.bindError("KQLB0353", literal.Span, "operator.scalar.has", fmt.Sprintf("term pattern exceeds MaxRegexBytes (%d)", limit))
+		s.bindError("KQLB0353", span, "operator.scalar.has", fmt.Sprintf("term pattern exceeds MaxRegexBytes (%d)", limit))
 		return nil, false
 	}
 	if negative {
@@ -244,6 +257,52 @@ func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expr
 	result := sqlast.Expr(&sqlast.Regex{Value: left, Pattern: s.bind(pattern), CaseSensitive: caseSensitive})
 	if negative {
 		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
+	}
+	return result, true
+}
+
+// runtimeTermMatch matches a term known only per row, such as a column. Its
+// pattern is built at run time from the term escaped by the application's
+// regex_quote, so data cannot inject regex syntax. An empty term never
+// matches, as no term is empty.
+func (s *compileState) runtimeTermMatch(left sqlast.Expr, expression kql.Expression, mode string, caseSensitive, negative bool) (sqlast.Expr, bool) {
+	leftBoundary, rightBoundary := s.termBoundaries()
+	before, after := leftBoundary, rightBoundary
+	switch mode {
+	case "prefix":
+		after = `[[:alnum:]]*`
+		if s.compiler.dialect.Name() == "sqlite" {
+			after = `[A-Za-z0-9]*`
+		}
+	case "suffix":
+		before = leftBoundary + `[A-Za-z0-9]*`
+		if s.compiler.dialect.Name() != "sqlite" {
+			before = leftBoundary + `[[:alnum:]]*`
+		}
+	}
+	text := func(value string) kql.Expression {
+		return &kql.LiteralExpression{Kind: kql.StringToken, Text: strconv.Quote(value)}
+	}
+	mark := len(s.diagnostics)
+	term := s.expression(expression)
+	if term.SQL == nil || (term.Type != TypeString && term.Type != TypeUnknown && term.Type != TypeDynamic) {
+		s.diagnostics = s.diagnostics[:mark]
+		return nil, false
+	}
+	pattern := s.expression(&kql.CallExpression{Function: &kql.NameExpression{Name: "strcat"}, Args: []kql.Expression{
+		text(before), &kql.CallExpression{Function: &kql.NameExpression{Name: "regex_quote"}, Args: []kql.Expression{expression}}, text(after),
+	}})
+	if pattern.SQL == nil {
+		s.diagnostics = s.diagnostics[:mark]
+		return nil, false
+	}
+	nonEmpty := &sqlast.Binary{Left: &sqlast.Call{Name: "length", Args: []sqlast.Expr{term.SQL}}, Operator: ">", Right: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}
+	if negative {
+		left = emptyIfNull(left)
+	}
+	result := sqlast.Expr(&sqlast.Binary{Left: nonEmpty, Operator: "AND", Right: &sqlast.Regex{Value: left, Pattern: pattern.SQL, CaseSensitive: caseSensitive}})
+	if negative {
+		result = &sqlast.Unary{Operator: "NOT ", Operand: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{result, &sqlast.Literal{Kind: sqlast.BooleanLiteral, Value: "false"}}}}
 	}
 	return result, true
 }
@@ -416,4 +475,76 @@ func (s *compileState) tabularMembership(op string, left boundExpr, pipeline *kq
 
 func emptyIfNull(value sqlast.Expr) sqlast.Expr {
 	return &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{value, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}
+}
+
+// betweenBounds rewrites between (Start .. Span), a datetime start with a
+// timespan length, to between (Start .. Start + Span), as Kusto defines it.
+func (s *compileState) betweenBounds(op string, right kql.Expression) kql.Expression {
+	list, ok := right.(*kql.ListExpression)
+	if (op != "between" && op != "!between") || !ok || len(list.Items) != 2 {
+		return right
+	}
+	saved, mark := len(s.args), len(s.diagnostics)
+	lower, upper := s.expression(list.Items[0]), s.expression(list.Items[1])
+	s.args, s.diagnostics = s.args[:saved], s.diagnostics[:mark]
+	if lower.Type != TypeDateTime || upper.Type != TypeTimespan {
+		return right
+	}
+	end := &kql.BinaryExpression{Left: list.Items[0], Operator: "+", Right: list.Items[1], Span: list.Span}
+	return &kql.ListExpression{Items: []kql.Expression{list.Items[0], end}, Span: list.Span}
+}
+
+// kustoString reads a string-typed operand as Kusto does: a null string is
+// "". Other types keep their nulls.
+func kustoString(value boundExpr) sqlast.Expr {
+	if value.Type == TypeString {
+		return emptyIfNull(value.SQL)
+	}
+	return value.SQL
+}
+
+// isEmptyString reports a literal or bound parameter "".
+func (s *compileState) isEmptyString(expression sqlast.Expr) bool {
+	switch expression.(type) {
+	case *sqlast.Literal, *sqlast.Parameter:
+		value, ok := s.constantValue(expression)
+		text, isText := value.(string)
+		return ok && isText && text == ""
+	}
+	return false
+}
+
+func (s *compileState) containsEmptyString(items []sqlast.Expr) bool {
+	for _, item := range items {
+		if s.isEmptyString(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func isConstant(expression sqlast.Expr) bool {
+	switch expression.(type) {
+	case *sqlast.Literal, *sqlast.Parameter:
+		return true
+	}
+	return false
+}
+
+// stringEquality compares strings with Kusto's empty-for-null semantics
+// where they differ from SQL's: != and comparisons with "" or between two
+// non-literal strings. Equality with a non-empty literal stays a plain
+// comparison, which filters identically and keeps indexes usable.
+func (s *compileState) stringEquality(op string, left, right boundExpr) (sqlast.Expr, bool) {
+	if (op != "==" && op != "!=" && op != "<>") || left.Type != TypeString || right.Type != TypeString {
+		return nil, false
+	}
+	if op == "==" && (isConstant(left.SQL) || isConstant(right.SQL)) && !s.isEmptyString(left.SQL) && !s.isEmptyString(right.SQL) {
+		return nil, false
+	}
+	comparison := "="
+	if op != "==" {
+		comparison = "<>"
+	}
+	return &sqlast.Binary{Left: kustoString(left), Operator: comparison, Right: kustoString(right)}, true
 }

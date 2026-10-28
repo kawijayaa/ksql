@@ -153,3 +153,22 @@ missing tables, failing only when none exists.
 `query_now` fixes `now()` and `ago()`, and `query_bin_auto_size`/`query_bin_auto_at`
 define `bin_auto(x)` as `bin(x, size)` or `bin_at(x, size, at)`. Other options
 tune Kusto's execution; they are accepted with warning `KQLL0104`.
+
+## Null strings, between spans and per-row terms
+
+Kusto strings are never null: a null string reads as `""`. For string
+operands, `!=`, `==` against `""`, `==` between two non-constant strings,
+`=~`/`!~`, `in~`/`!in~`, `!in`, and `in` lists containing `""` all compare
+`coalesce(x, '')`. `==` against a non-empty constant stays a plain
+comparison. It filters identically and keeps indexes usable, but yields null
+rather than false when the operand is null. Dynamic nulls keep SQL null
+semantics.
+
+`T between (Start .. Span)` with a datetime start and a timespan span means
+`Start .. Start + Span`, inclusive.
+
+`has`, `has_cs`, `hasprefix` and `hassuffix` (and their negations) accept a
+term known only per row, such as a column. The pattern is built at run time
+from the application's `regex_quote` of the term, so data cannot inject
+regex syntax. An empty term never matches. Compile-time constants, including
+`let` values and function parameters, use the literal path.
