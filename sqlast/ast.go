@@ -16,6 +16,9 @@ type Select struct {
 	GroupBy     []Expr
 	OrderBy     []Order
 	Limit       Expr
+	// Fence asks dialects that inline subqueries to evaluate this select's
+	// projections once per row. It never changes results.
+	Fence bool
 }
 
 func (*Select) queryNode() {}
@@ -180,6 +183,13 @@ type Regex struct {
 	Pattern       Expr
 	CaseSensitive bool
 }
+
+// RegexCaptures returns a JSON array of the capture groups of the first
+// match of Pattern in Value (group one at index zero), or null on no match.
+type RegexCaptures struct {
+	Value   Expr
+	Pattern Expr
+}
 type Exists struct{ Query Query }
 
 // ScalarReference reads the first value from a materialized scalar binding.
@@ -213,6 +223,7 @@ func (*Cast) exprNode()            {}
 func (*DynamicValue) exprNode()    {}
 func (*Index) exprNode()           {}
 func (*Regex) exprNode()           {}
+func (*RegexCaptures) exprNode()   {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

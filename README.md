@@ -95,6 +95,8 @@ The built-in relational compiler currently lowers:
 - single-array SQLite `mv-expand` and row-wise `mv-apply` subqueries using
   `where`, `extend`, and `serialize`; unsupported replacement, multi-array,
   and aggregating forms return diagnostics
+- [`parse` and `parse-where`](docs/parse-operator.md) in simple, regex and
+  relaxed kinds through an explicit regex capture capability
 - scalar and tabular `let` bindings, plus scalar/table query-defined functions with
   typed parameters, literal defaults, named arguments, lexical captures,
   local declarations, nested functions, table parameters, and named `invoke`
@@ -139,6 +141,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Operator support and dialect limits](docs/operator-support.md)
 - [Scalar and tabular query-defined functions](docs/query-functions.md)
 - [Typed query parameter declarations](docs/query-parameters.md)
+- [String parsing with `parse` and `parse-where`](docs/parse-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)
 - [Feature ledger](features/README.md)

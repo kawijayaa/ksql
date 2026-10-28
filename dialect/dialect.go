@@ -123,7 +123,7 @@ func unionOperandNeedsWrapper(query sqlast.Query) bool {
 	case *sqlast.Union:
 		return true
 	case *sqlast.Select:
-		return value.Limit != nil || len(value.OrderBy) > 0
+		return value.Limit != nil || len(value.OrderBy) > 0 || value.Fence
 	default:
 		return true
 	}
@@ -218,6 +218,13 @@ func (r renderer) selectQuery(query *sqlast.Select) (string, error) {
 			return "", err
 		}
 		sql = r.dialect.ApplyLimit(sql, limit)
+	}
+	if query.Fence {
+		if capability, ok := r.dialect.(interface {
+			Fence(selectSQL string, limited bool) string
+		}); ok {
+			sql = capability.Fence(sql, query.Limit != nil)
+		}
 	}
 	return sql, nil
 }
@@ -561,6 +568,23 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return result, nil
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression operator", r.dialect.Name())
+	case *sqlast.RegexCaptures:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		pattern, err := r.expr(e.Pattern)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			RegexCaptures(value, pattern string) (string, bool)
+		}); ok {
+			if result, supported := capability.RegexCaptures(value, pattern); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
 	case *sqlast.Exists:
 		query, err := r.query(e.Query)
 		if err != nil {

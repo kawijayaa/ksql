@@ -4,6 +4,7 @@ import "strings"
 
 type sqlite struct {
 	regexFunction            string
+	regexCapturesFunction    string
 	regexCaseInsensitiveFlag string
 }
 
@@ -17,6 +18,17 @@ func WithRegexFunction(name string) SQLiteOption {
 	return func(d *sqlite) {
 		if validFunctionName(name) {
 			d.regexFunction = name
+		}
+	}
+}
+
+// WithRegexCapturesFunction configures a two-argument UDF accepting value,
+// pattern and returning a JSON array of the first match's capture groups, with
+// null for no match. Patterns use RE2 syntax. Invalid identifiers are ignored.
+func WithRegexCapturesFunction(name string) SQLiteOption {
+	return func(d *sqlite) {
+		if validFunctionName(name) {
+			d.regexCapturesFunction = name
 		}
 	}
 }
@@ -60,6 +72,12 @@ func (d sqlite) Regex(left, right string, caseSensitive bool) (string, bool) {
 		}
 	}
 	return d.regexFunction + "(" + right + ", " + left + ")", true
+}
+func (d sqlite) RegexCaptures(value, pattern string) (string, bool) {
+	if d.regexCapturesFunction == "" {
+		return "", false
+	}
+	return d.regexCapturesFunction + "(" + value + ", " + pattern + ")", true
 }
 func (d sqlite) JSONIndex(value, index string) string {
 	return d.JSONIndexExpression(value, index, false)
@@ -105,7 +123,16 @@ func (sqlite) JSONEach(value, alias string) (string, bool) {
 	value = "CASE WHEN " + value + " IS NULL THEN json_array(NULL) ELSE " + value + " END"
 	return "json_each(" + value + ") AS " + alias, true
 }
-func (sqlite) Random() (string, bool)              { return "RANDOM()", true }
+func (sqlite) Random() (string, bool) { return "RANDOM()", true }
+
+// Fence uses OFFSET, which the SQLite query flattener never inlines, while
+// keeping the subquery a streaming co-routine rather than a materialized table.
+func (sqlite) Fence(sql string, limited bool) string {
+	if limited {
+		return sql + " OFFSET 0"
+	}
+	return sql + " LIMIT -1 OFFSET 0"
+}
 func (sqlite) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
 func (sqlite) SupportsNullOrdering() bool          { return true }
 func (sqlite) SupportsJoinUsing() bool             { return true }

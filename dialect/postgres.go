@@ -41,6 +41,9 @@ func (postgres) Series(column, from, to, step, alias string) (string, bool) {
 }
 func (postgres) JSONEach(_, _ string) (string, bool) { return "", false }
 func (postgres) Random() (string, bool)              { return "RANDOM()", true }
+
+// Fence uses OFFSET 0, which PostgreSQL does not pull up into the outer query.
+func (postgres) Fence(sql string, _ bool) string     { return sql + " OFFSET 0" }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
 func (postgres) SupportsNullOrdering() bool          { return true }
 func (postgres) SupportsJoinUsing() bool             { return true }

@@ -175,3 +175,25 @@ func TestSQLiteRegexFunction(t *testing.T) {
 		t.Fatal("invalid regex function name was accepted")
 	}
 }
+
+func TestSelectFenceRendering(t *testing.T) {
+	inner := &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}, Alias: "x"}}, Fence: true}
+	query := &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: "s"}}
+	for _, tc := range []struct {
+		dialect Dialect
+		want    string
+	}{
+		{SQLite(), `SELECT * FROM (SELECT 1 AS "x" LIMIT -1 OFFSET 0) AS "s"`},
+		{PostgreSQL(), `SELECT * FROM (SELECT 1 AS "x" OFFSET 0) AS "s"`},
+		{MySQL(), "SELECT * FROM (SELECT 1 AS `x`) AS `s`"},
+	} {
+		got, err := Render(tc.dialect, query)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: got %q, %v; want %q", tc.dialect.Name(), got, err, tc.want)
+		}
+	}
+	inner.Limit = &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "5"}
+	if got, _ := Render(SQLite(), query); got != `SELECT * FROM (SELECT 1 AS "x" LIMIT 5 OFFSET 0) AS "s"` {
+		t.Fatalf("limited fence = %q", got)
+	}
+}
