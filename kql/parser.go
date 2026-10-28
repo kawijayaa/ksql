@@ -373,6 +373,8 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		return parseAs(op, body)
 	case "parse", "parse-where":
 		return parseParseOperator(op, body)
+	case "parse-kv":
+		return parseParseKV(op, body)
 	case "sample-distinct":
 		return parseSampleDistinct(op, body)
 	case "invoke":

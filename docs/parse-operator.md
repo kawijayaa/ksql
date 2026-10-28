@@ -112,5 +112,5 @@ Still open:
   columns in strict modes. These use `(.*?)` followed by conversion.
 - Datetime spellings accepted by conversion depend on the application's
   `todatetime` mapping.
-- `parse-kv`.
+- `parse-kv` is described in [its own guide](parse-kv-operator.md).
 - Differential conformance against a live Kusto engine.

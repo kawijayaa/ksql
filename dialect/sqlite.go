@@ -5,6 +5,7 @@ import "strings"
 type sqlite struct {
 	regexFunction            string
 	regexCapturesFunction    string
+	keyValuesFunction        string
 	regexCaseInsensitiveFlag string
 }
 
@@ -29,6 +30,17 @@ func WithRegexCapturesFunction(name string) SQLiteOption {
 	return func(d *sqlite) {
 		if validFunctionName(name) {
 			d.regexCapturesFunction = name
+		}
+	}
+}
+
+// WithKeyValuesFunction configures a two-argument UDF accepting value,
+// options and returning a JSON object of extracted keys, such as one that
+// calls runtime.KeyValuesJSON. Invalid identifiers are ignored.
+func WithKeyValuesFunction(name string) SQLiteOption {
+	return func(d *sqlite) {
+		if validFunctionName(name) {
+			d.keyValuesFunction = name
 		}
 	}
 }
@@ -78,6 +90,12 @@ func (d sqlite) RegexCaptures(value, pattern string) (string, bool) {
 		return "", false
 	}
 	return d.regexCapturesFunction + "(" + value + ", " + pattern + ")", true
+}
+func (d sqlite) KeyValues(value, options string) (string, bool) {
+	if d.keyValuesFunction == "" {
+		return "", false
+	}
+	return d.keyValuesFunction + "(" + value + ", " + options + ")", true
 }
 func (d sqlite) JSONIndex(value, index string) string {
 	return d.JSONIndexExpression(value, index, false)

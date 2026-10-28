@@ -37,6 +37,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	if operator.Kind == "parse" || operator.Kind == "parse-where" {
 		return s.parseOperator(input, operator)
 	}
+	if operator.Kind == "parse-kv" {
+		return s.parseKVOperator(input, operator)
+	}
 	if operator.Kind == "mv-apply" {
 		return s.mvApply(input, operator.Body.(kql.MvApplySpec), operator)
 	}

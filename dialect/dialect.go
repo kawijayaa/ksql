@@ -585,6 +585,23 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.KeyValues:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		options, err := r.expr(e.Options)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			KeyValues(value, options string) (string, bool)
+		}); ok {
+			if result, supported := capability.KeyValues(value, options); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no key-value extraction function", r.dialect.Name())
 	case *sqlast.Exists:
 		query, err := r.query(e.Query)
 		if err != nil {

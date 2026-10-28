@@ -63,6 +63,8 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			value.Value = expression(value.Value)
 		case *RegexCaptures:
 			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
+		case *KeyValues:
+			value.Value, value.Options = expression(value.Value), expression(value.Options)
 		case *Exists:
 			visitQuery(value.Query)
 		case *RankedValue:

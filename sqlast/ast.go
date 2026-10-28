@@ -190,6 +190,13 @@ type RegexCaptures struct {
 	Value   Expr
 	Pattern Expr
 }
+
+// KeyValues returns a JSON object of requested parse-kv keys extracted from
+// Value, configured by a JSON runtime.KeyValueOptions document in Options.
+type KeyValues struct {
+	Value   Expr
+	Options Expr
+}
 type Exists struct{ Query Query }
 
 // ScalarReference reads the first value from a materialized scalar binding.
@@ -224,6 +231,7 @@ func (*DynamicValue) exprNode()    {}
 func (*Index) exprNode()           {}
 func (*Regex) exprNode()           {}
 func (*RegexCaptures) exprNode()   {}
+func (*KeyValues) exprNode()       {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

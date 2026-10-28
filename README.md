@@ -96,7 +96,8 @@ The built-in relational compiler currently lowers:
   `where`, `extend`, and `serialize`; unsupported replacement, multi-array,
   and aggregating forms return diagnostics
 - [`parse` and `parse-where`](docs/parse-operator.md) in simple, regex and
-  relaxed kinds through an explicit regex capture capability
+  relaxed kinds through an explicit regex capture capability, and
+  [`parse-kv`](docs/parse-kv-operator.md) through the `runtime` package
 - scalar and tabular `let` bindings, plus scalar/table query-defined functions with
   typed parameters, literal defaults, named arguments, lexical captures,
   local declarations, nested functions, table parameters, and named `invoke`
@@ -142,6 +143,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Scalar and tabular query-defined functions](docs/query-functions.md)
 - [Typed query parameter declarations](docs/query-parameters.md)
 - [String parsing with `parse` and `parse-where`](docs/parse-operator.md)
+- [Key-value extraction with `parse-kv`](docs/parse-kv-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)
 - [Feature ledger](features/README.md)
