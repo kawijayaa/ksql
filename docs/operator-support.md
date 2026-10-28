@@ -23,7 +23,7 @@ positioned diagnostic and no partial SQL.
 | `innerunique` (default join) | Yes | `JoinSpec` | Bound left schema | Partitioned `ROW_NUMBER` then inner join | SQLite; other dialect renderer checks | One complete left representative per equality-key tuple; representative is unspecified |
 | `lookup` | Yes | `JoinSpec` | Yes | Yes | Renderer tests | Right same-name columns are omitted; size hints are not enforced |
 | `union` (pipeline or standalone) | Yes | `UnionSpec` | Bound schemas | Name/type-aligned `UNION ALL` | SQLite | Outer null padding and type suffixes with collision avoidance; inner intersects name/type pairs; preserves duplicates |
-| `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value | SQLite JSON1 | Lossy SQLite casts; arrays/objects tested, multiple expansions unsupported |
+| `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value, or several in lockstep | SQLite JSON1 | Lossy SQLite casts; several columns expand by index with null padding, bags as single-property bags (or `kind=array` pairs) |
 | `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize` | SQLite JSON1 | Equivalent for documented row-wise subset |
 | `mv-apply` aggregating | Yes | `MvApplySpec` | No | No | None | Unsupported with `KQLL0334` |
 | `parse`, `parse-where` | Yes | `ParseSpec` | Bound schema | One anchored RE2 capture array per row, then typed conversions | SQLite with capture UDF | `simple`, `regex` (with `i`/`m`/`s`/`U` flags) and `relaxed` kinds; strict conversion gating; see [parse guide](parse-operator.md) |
@@ -72,7 +72,6 @@ return a diagnostic; they are never lowered to `LIKE`.
 
 - Column-selection patterns are supported by `project-away`, `project-keep`, and `project-reorder`. Zero-column outputs remain unsupported; exact-name binding remains case-insensitive. Numeric sorting is verified for ASCII digit runs; Unicode digit collation still needs conformance coverage.
 - Schema-declared `bag_unpack` and aggregating `mv-apply` are unsupported.
-- Multiple-array expansion is rejected.
 - Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string; those distinctions remain pending.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
 - `MaxInputRowsPerStage` is reserved until supported operators can enforce it

@@ -187,6 +187,14 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// ExpansionArray normalizes a dynamic value for mv-expand: arrays stay as
+// they are, property bags become an array of single-property bags (or of
+// [key, value] pairs when Pairs is set), and other values become null.
+type ExpansionArray struct {
+	Value Expr
+	Pairs bool
+}
+
 // InSubquery tests whether Value equals a non-null Column of Query.
 type InSubquery struct {
 	Value           Expr
@@ -274,6 +282,7 @@ func (*DatetimeDiff) exprNode()    {}
 func (*TimespanText) exprNode()    {}
 func (*ArrayContains) exprNode()   {}
 func (*InSubquery) exprNode()      {}
+func (*ExpansionArray) exprNode()  {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

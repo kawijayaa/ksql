@@ -128,6 +128,17 @@ func (sqlite) ArrayContains(array, value string, caseInsensitive bool) (string, 
 	}
 	return "EXISTS (SELECT 1 FROM (SELECT " + array + " AS haystack, " + value + " AS needle) AS ksql_in, json_each(CASE WHEN json_valid(ksql_in.haystack) THEN ksql_in.haystack END) AS ksql_in_values WHERE " + element + " = " + needle + ")", true
 }
+
+// ExpansionArray renders the value once; nested JSON keeps its structure.
+func (sqlite) ExpansionArray(value string, pairs bool) (string, bool) {
+	element := "json_object(ksql_bag.key, CASE WHEN ksql_bag.type IN ('object', 'array') THEN json(ksql_bag.value) ELSE ksql_bag.value END)"
+	if pairs {
+		element = "json_array(ksql_bag.key, CASE WHEN ksql_bag.type IN ('object', 'array') THEN json(ksql_bag.value) ELSE ksql_bag.value END)"
+	}
+	return "(SELECT CASE WHEN NOT json_valid(ksql_expand.d) THEN NULL WHEN json_type(ksql_expand.d) = 'array' THEN ksql_expand.d " +
+		"WHEN json_type(ksql_expand.d) = 'object' THEN (SELECT json_group_array(" + element + ") FROM json_each(ksql_expand.d) AS ksql_bag) END " +
+		"FROM (SELECT " + value + " AS d) AS ksql_expand)", true
+}
 func (d sqlite) DatetimeAdd(datetime, ticks string) (string, bool) {
 	if d.datetimeAddFunction == "" {
 		return "", false

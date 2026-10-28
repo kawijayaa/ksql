@@ -600,6 +600,19 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.ExpansionArray:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			ExpansionArray(value string, pairs bool) (string, bool)
+		}); ok {
+			if result, supported := capability.ExpansionArray(value, e.Pairs); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s cannot expand dynamic values", r.dialect.Name())
 	case *sqlast.InSubquery:
 		value, err := r.expr(e.Value)
 		if err != nil {

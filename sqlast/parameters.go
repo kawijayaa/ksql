@@ -63,6 +63,8 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			value.Value = expression(value.Value)
 		case *RegexCaptures:
 			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
+		case *ExpansionArray:
+			value.Value = expression(value.Value)
 		case *InSubquery:
 			value.Value = expression(value.Value)
 			visitQuery(value.Query)

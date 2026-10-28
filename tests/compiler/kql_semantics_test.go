@@ -113,3 +113,31 @@ func TestUnionWithSource(t *testing.T) {
 		t.Fatal("withsource colliding with a column was accepted")
 	}
 }
+
+// Microsoft's mv-expand of several columns: arrays expand in lockstep and
+// shorter arrays pad with null.
+func TestMultiColumnMvExpand(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`datatable (a: int, b: dynamic, c: dynamic)[1, dynamic({"prop1":"a1", "prop2":"b1"}), dynamic([5, 4, 3])] | mv-expand b, c`, `[[1 {"prop1":"a1"} 5] [1 {"prop2":"b1"} 4] [1 <nil> 3]]`},
+		{`print x=dynamic([1,2,3]), y=dynamic(["a","b"]) | mv-expand with_itemindex=i x, y`, `[[1 a 0] [2 b 1] [3 <nil> 2]]`},
+		{`print x=dynamic([1,2,3]), y=dynamic(["a","b"]) | mv-expand x to typeof(long), y limit 2`, `[[1 a] [2 b]]`},
+		{`print x=dynamic([]), y=dynamic([]) | mv-expand x, y | count`, `[[0]]`},
+		{`print x=dynamic([[1,2],{"k":3}]), y=dynamic([7]) | mv-expand x, y`, `[[[1,2] 7] [{"k":3} <nil>]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+}
+
+func TestMultiColumnMvExpandKinds(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	result := compiler.Compile(`print b=dynamic({"k":1,"j":[2]}), c=dynamic([5]) | mv-expand kind=array b, c`)
+	if got := fmt.Sprint(queryRows(t, db, result)); got != `[[["k",1] 5] [["j",[2]] <nil>]]` {
+		t.Fatalf("rows = %s; SQL=%s", got, result.SQL)
+	}
+}

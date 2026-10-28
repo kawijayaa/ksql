@@ -42,9 +42,12 @@ func (s *compileState) expandJSON(input Relation, items []kql.MvExpansion, itemI
 		s.bindError("KQLB0337", operator.Span, "operator."+operator.Kind, fmt.Sprintf("expansion exceeds MaxExpansionItems (%d)", s.compiler.limits.MaxExpansionItems))
 		return Relation{}
 	}
-	if len(items) != 1 {
-		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" currently requires exactly one array expression")
+	if len(items) == 0 {
+		s.error("KQLL0331", operator.Span, "operator."+operator.Kind, operator.Kind+" requires an array expression")
 		return Relation{}
+	}
+	if len(items) > 1 {
+		return s.expandArrays(input, items, itemIndex, limit, expansionKind, operator)
 	}
 	item := items[0]
 	sourceName := ""
@@ -163,4 +166,120 @@ func supportsJSONEach(target dialect.Dialect) bool {
 	}
 	_, ok = capability.JSONEach("", "")
 	return ok
+}
+
+// expandArrays expands several arrays in lockstep: row i holds the i-th
+// element of each array, and shorter arrays (or non-array values) give null.
+// The longest array drives the expansion.
+func (s *compileState) expandArrays(input Relation, items []kql.MvExpansion, itemIndex string, limit kql.Expression, expansionKind string, operator kql.Operator) Relation {
+	feature := "operator." + operator.Kind
+	if input.Schema.Unknown {
+		s.error("KQLL0333", operator.Span, feature, "multi-column expansion requires a bound input schema")
+		return Relation{}
+	}
+	inputAlias, driverAlias := s.nextAlias(), s.nextAlias()
+	previousQualifier, previousInput := s.qualifier, s.input
+	s.qualifier, s.input = inputAlias, input.Schema
+	values := make([]boundExpr, len(items))
+	seen := map[string]bool{}
+	for i, item := range items {
+		if item.Name == "" {
+			s.qualifier, s.input = previousQualifier, previousInput
+			s.error("KQLL0332", item.Span, feature, operator.Kind+" requires an explicit output name for non-column expressions")
+			return Relation{}
+		}
+		if seen[strings.ToLower(item.Name)] {
+			s.qualifier, s.input = previousQualifier, previousInput
+			s.bindError("KQLB0406", item.Span, feature, "duplicate expansion column "+item.Name)
+			return Relation{}
+		}
+		seen[strings.ToLower(item.Name)] = true
+		values[i] = s.expression(item.Expression)
+		if values[i].SQL == nil {
+			s.qualifier, s.input = previousQualifier, previousInput
+			return Relation{}
+		}
+		if values[i].Type != TypeDynamic && values[i].Type != TypeUnknown {
+			s.qualifier, s.input = previousQualifier, previousInput
+			s.bindError("KQLB0338", item.Span, feature, "expanded expression must be dynamic")
+			return Relation{}
+		}
+		values[i].SQL = &sqlast.ExpansionArray{Value: values[i].SQL, Pairs: expansionKind == "array"}
+	}
+	s.qualifier, s.input = previousQualifier, previousInput
+	length := func(value sqlast.Expr) sqlast.Expr {
+		array := &sqlast.Case{Branches: []sqlast.When{{
+			Condition: &sqlast.Call{Name: "json_valid", Args: []sqlast.Expr{value}},
+			Result: &sqlast.Case{Branches: []sqlast.When{{
+				Condition: &sqlast.Binary{Left: &sqlast.Call{Name: "json_type", Args: []sqlast.Expr{value}}, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "array"}},
+				Result:    value,
+			}}},
+		}}}
+		return &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.Call{Name: "json_array_length", Args: []sqlast.Expr{array}}, &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}
+	}
+	// The driver is the first array whose length is at least every other's.
+	driver := &sqlast.Case{}
+	for i, value := range values {
+		var condition sqlast.Expr
+		for j, other := range values {
+			if i == j {
+				continue
+			}
+			test := &sqlast.Binary{Left: length(value.SQL), Operator: ">=", Right: length(other.SQL)}
+			if condition == nil {
+				condition = test
+			} else {
+				condition = &sqlast.Binary{Left: condition, Operator: "AND", Right: test}
+			}
+		}
+		// Ties pick the first value, so all-empty arrays expand to no rows
+		// and null values to one null row, as for single-column expansion.
+		driver.Branches = append(driver.Branches, sqlast.When{Condition: condition, Result: value.SQL})
+	}
+	position := &sqlast.Identifier{Parts: []string{driverAlias, "key"}}
+	from := &sqlast.Join{
+		Left:  &sqlast.Subquery{Query: input.Query, Alias: inputAlias},
+		Right: &sqlast.JSONEach{Value: driver, Alias: driverAlias},
+		Kind:  "CROSS",
+	}
+	output := input.Schema.Clone()
+	elements := map[string]sqlast.Expr{}
+	for i, item := range items {
+		element := sqlast.Expr(&sqlast.Index{Value: values[i].SQL, Index: position, Numeric: true})
+		columnType := TypeDynamic
+		if item.Type != "" {
+			columnType = parseScalarType(item.Type)
+			if columnType == TypeUnknown {
+				s.error("KQLL0335", item.Span, feature, "unsupported expansion type "+item.Type)
+				return Relation{}
+			}
+			element = &sqlast.Cast{Expr: element, Type: map[ScalarType]string{TypeLong: "BIGINT", TypeInt: "INTEGER", TypeReal: "DOUBLE PRECISION", TypeString: "VARCHAR", TypeBool: "BOOLEAN", TypeDateTime: "TIMESTAMP", TypeTimespan: "BIGINT", TypeDynamic: "VARCHAR"}[columnType]}
+		}
+		elements[strings.ToLower(item.Name)] = element
+		if _, at, replacing, _ := output.Lookup(item.Name); replacing {
+			output.Columns[at] = Column{Name: output.Columns[at].Name, Type: columnType}
+		} else {
+			output.Columns = append(output.Columns, Column{Name: item.Name, Type: columnType})
+		}
+	}
+	projections := make([]sqlast.SelectItem, 0, len(output.Columns)+1)
+	for _, column := range output.Columns {
+		expr := sqlast.Expr(&sqlast.Identifier{Parts: []string{inputAlias, column.Name}})
+		if element, ok := elements[strings.ToLower(column.Name)]; ok {
+			expr = element
+		}
+		projections = append(projections, sqlast.SelectItem{Expr: expr, Alias: column.Name})
+	}
+	if itemIndex != "" {
+		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Cast{Expr: position, Type: "INTEGER"}, Alias: itemIndex})
+		output.Columns = append(output.Columns, Column{Name: itemIndex, Type: TypeLong})
+	}
+	if !s.checkProjectionWidth(len(projections), operator.Span, feature) {
+		return Relation{}
+	}
+	query := &sqlast.Select{From: from, Projections: projections}
+	if limit != nil {
+		query.Where = &sqlast.Binary{Left: &sqlast.Cast{Expr: position, Type: "INTEGER"}, Operator: "<", Right: s.expression(limit).SQL}
+	}
+	return Relation{Query: query, Schema: output}
 }
