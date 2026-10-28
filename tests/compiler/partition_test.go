@@ -74,3 +74,20 @@ func TestSQLiteExecPartition(t *testing.T) {
 		t.Fatalf("native partitions beyond 64: %v", result.Diagnostics)
 	}
 }
+
+// evaluate narrow and pivot (with discovered values) in KSQL.
+func TestSQLiteExecNarrowAndPivot(t *testing.T) {
+	db := openInvestigationDB(t)
+	target := dialect.SQLite()
+	compiler := ksql.New(target, ksql.WithParameters(), ksql.WithValuesResolver(valuesResolver(t, db, target)))
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(a:long, b:string)[1, "x", 2, "y"] | evaluate narrow() | order by Row asc, Column asc`, `[[0 a 1] [0 b x] [1 a 2] [1 b y]]`},
+		{`datatable(g:string, k:string, v:long)["a", "p", 1, "a", "q", 2, "b", "p", 5] | evaluate pivot(k, sum(v)) | order by g asc`, `[[a 1 2] [b 5 0]]`},
+		{`datatable(g:string, k:long)["a", 1, "a", 1, "b", 2] | evaluate pivot(k) | order by g asc`, `[[a 2 0] [b 0 1]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+}

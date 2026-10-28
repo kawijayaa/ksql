@@ -34,8 +34,17 @@ func (s *compileState) evaluate(input Relation, operator kql.Operator) Relation 
 	spec := operator.Body.(kql.EvaluateSpec)
 	feature := "plugin." + spec.Plugin
 	s.use(feature, "equivalent", operator.Span)
-	if spec.Plugin == "bag_unpack" {
+	switch spec.Plugin {
+	case "bag_unpack":
 		return s.bagUnpack(input, spec, feature)
+	case "narrow":
+		return s.narrow(input, spec, feature)
+	case "pivot":
+		return s.pivot(input, spec, operator, feature)
+	case "ipv4_lookup":
+		return s.ipLookup(input, spec, feature, "ipv4_is_in_range")
+	case "ipv6_lookup":
+		return s.ipLookup(input, spec, feature, "ipv6_is_in_range")
 	}
 	s.error("KQLL0391", operator.Span, feature, "evaluate plugin "+spec.Plugin+" is not supported by SQL lowering")
 	return Relation{}
