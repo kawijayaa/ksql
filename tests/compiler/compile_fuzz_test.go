@@ -19,6 +19,12 @@ func FuzzCompileNeverPanics(f *testing.F) {
 		`T | mv-apply v=a to typeof(long) on (top 1 by v | summarize s=sum(v))`, `print x=dynamic({"d": datetime(2020-01-01)})`,
 		`T | summarize percentiles(x, 50, 99.9)`, `T | project-by-names "a*", dynamic(["b"])`, `print 0xFFFFFFFF`,
 		`T | extend a = pack_all(true)`, `union withsource=s (T | as A), (U | as B)`, `T | evaluate narrow()`,
+		`datatable(s:string)["a b"] | reduce kind=source by s with threshold=0.5, characters="-"`,
+		`datatable(t:datetime, e:string, u:string)[] | evaluate sequence_detect(t, 1h, 2h, a=(e=="a"), e=="b", u)`,
+		`datatable(u:string, t:datetime)[] | evaluate sliding_window_counts(u, t, datetime(2020-01-01), datetime(2020 - 01 - 07), 3d, 1d)`,
+		`let V_1 = view () { print x=1 }; union isfuzzy=true V*, *X, (V_1 | where x > 0)`,
+		`print guid({12e8b78d-55b4-46ae-b068-26d7a0080254}), f(a=1, 2)`,
+		`print x=dynamic(["2020-01-01"]) | mv-expand x to typeof(datetime), y to typeof(guid)`,
 	} {
 		f.Add(seed)
 	}
