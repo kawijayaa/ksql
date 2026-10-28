@@ -27,6 +27,7 @@ positioned diagnostic and no partial SQL.
 | `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize` | SQLite JSON1 | Equivalent for documented row-wise subset |
 | `mv-apply` aggregating | Yes | `MvApplySpec` | No | No | None | Unsupported with `KQLL0334` |
 | `parse`, `parse-where` | Yes | `ParseSpec` | Bound schema | One anchored RE2 capture array per row, then typed conversions | SQLite with capture UDF | `simple`, `regex` (with `i`/`m`/`s`/`U` flags) and `relaxed` kinds; strict conversion gating; see [parse guide](parse-operator.md) |
+| `render` | Yes | `RenderSpec` | Final schema | Annotation only; rows unchanged | All | Validated `Result.Visualization`; must be last; see [render guide](render-operator.md) |
 | `parse-kv` | Yes | `ParseKVSpec` | Bound schema | One key-value extraction per row via `runtime.KeyValuesJSON`, then typed conversions | SQLite with registered function | Delimited, free and regex modes with quotes, escapes and greedy values; see [parse-kv guide](parse-kv-operator.md) |
 | `evaluate bag_unpack` | Yes | Opaque | No | No | None | Unsupported; schema declaration is not yet typed |
 | `dcount` | Yes | Call expression | Diagnostic | No default | None | Approximate KQL semantics require an explicit compatible mapping |

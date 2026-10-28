@@ -52,6 +52,8 @@ type Result struct {
 	Diagnostics []Diagnostic
 	Features    []FeatureUse
 	Columns     []Column
+	// Visualization is set when the query ends with render.
+	Visualization *Visualization
 }
 
 // OK reports whether compilation completed without an error.
@@ -100,13 +102,18 @@ func (c *Compiler) Compile(source string) Result {
 				continue
 			}
 			state.managementAllowed = len(tree.Statements) == 1 && node.Pipeline.Source.Kind == "management" && tree.Tokens[0].Text == "."
-			relation = state.pipeline(node.Pipeline)
+			pipeline, render := lastRender(node.Pipeline)
+			relation = state.pipeline(pipeline)
+			if render != nil && relation.Query != nil {
+				result.Visualization = state.render(*render, relation.Schema)
+			}
 		}
 	}
 	relation.Query = state.materializeQueries(relation.Query)
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features
 	if !result.OK() || relation.Query == nil {
+		result.Visualization = nil
 		return result
 	}
 	state.args = sqlast.NormalizeParameters(relation.Query, state.args)

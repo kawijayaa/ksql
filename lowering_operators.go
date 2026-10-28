@@ -37,6 +37,10 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	if operator.Kind == "parse" || operator.Kind == "parse-where" {
 		return s.parseOperator(input, operator)
 	}
+	if operator.Kind == "render" {
+		s.bindError("KQLB0399", operator.Span, feature, "render must be the last operator of the query")
+		return Relation{}
+	}
 	if operator.Kind == "parse-kv" {
 		return s.parseKVOperator(input, operator)
 	}
