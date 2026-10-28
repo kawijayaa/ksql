@@ -105,6 +105,10 @@ func parseLet(tokens []Token) (Statement, []ParseError) {
 	if len(value) == 0 {
 		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokens[equal].Span}}
 	}
+	// let V = view () { ... } declares a parameterless view function.
+	if len(value) > 1 && lower(value[0]) == "view" && value[1].Text == "(" {
+		value = value[1:]
+	}
 	if value[0].Text == "(" {
 		close := matchingClose(value, 0)
 		if close >= 0 && close+1 < len(value) && value[close+1].Text == "{" {
@@ -331,6 +335,9 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 	}
 
 	body := tokens[1:]
+	if kind != "as" {
+		body = stripQueryHints(body)
+	}
 	if kind == "sort" && len(body) > 0 && lower(body[0]) == "by" {
 		body = body[1:]
 	}
@@ -614,6 +621,8 @@ func parseUnion(op Operator, tokens []Token) (Operator, []ParseError) {
 	for position+2 < len(tokens) && tokens[position].Kind == IdentifierToken && tokens[position+1].Text == "=" {
 		if lower(tokens[position]) == "kind" {
 			spec.Kind = lower(tokens[position+2])
+		} else if lower(tokens[position]) == "isfuzzy" && (lower(tokens[position+2]) == "true" || lower(tokens[position+2]) == "false") {
+			spec.IsFuzzy = lower(tokens[position+2]) == "true"
 		} else {
 			errs = append(errs, ParseError{Code: "KQLP0320", Message: "unsupported union parameter " + tokens[position].Text, Span: tokens[position].Span})
 		}
@@ -859,3 +868,28 @@ func tokensSpan(tokens []Token) Span {
 }
 
 func lower(token Token) string { return strings.ToLower(token.Text) }
+
+// stripQueryHints drops top-level hint.<name> = <value> parameters, such as
+// summarize hint.strategy=shuffle or join hint.remote=auto. They tune
+// distributed execution and never change results. as hint.materialized is
+// semantic and is parsed by its operator instead.
+func stripQueryHints(tokens []Token) []Token {
+	result := make([]Token, 0, len(tokens))
+	depth := 0
+	for i := 0; i < len(tokens); i++ {
+		switch tokens[i].Text {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			depth--
+		}
+		if depth == 0 && i+4 < len(tokens) && lower(tokens[i]) == "hint" && tokens[i+1].Text == "." &&
+			tokens[i+2].Kind == IdentifierToken && tokens[i+3].Text == "=" &&
+			(tokens[i+4].Kind == IdentifierToken || tokens[i+4].Kind == NumberToken || tokens[i+4].Kind == StringToken) {
+			i += 4
+			continue
+		}
+		result = append(result, tokens[i])
+	}
+	return result
+}

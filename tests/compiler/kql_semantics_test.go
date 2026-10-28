@@ -54,3 +54,43 @@ func TestLetNamesAreCaseSensitive(t *testing.T) {
 		t.Fatalf("an exact-case column must win over a let: %s", got)
 	}
 }
+
+func TestTabularMembershipAndHints(t *testing.T) {
+	db := openInvestigationDB(t)
+	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
+		compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()), ksql.WithParameterization(mode))
+		for _, tc := range []struct{ query, want string }{
+			{`datatable(h:string)["alpha","gamma"] | where h in (Events | project Host) | project h`, `[[alpha]]`},
+			{`datatable(h:string)["alpha","gamma"] | where h !in (Events | project Host) | project h`, `[[gamma]]`},
+			{`datatable(Host:string)["ALPHA","gamma"] | where Host in~ (Events | where Source != "x" | project Host) | project Host`, `[[ALPHA]]`},
+			{`let hosts = Events | where EventType == "process" | project Host; datatable(h:string)["alpha","beta"] | where h in (hosts) | count`, `[[1]]`},
+			{`datatable(h:string)["alpha"] | where h !in (datatable(x:string)["b", ""] | where x != "" | union (datatable(x:string)["c"])) | count`, `[[1]]`},
+			{`Events | summarize hint.strategy = shuffle n=count() by Host | join kind=inner hint.strategy=broadcast (Events | project Host, Source) on Host | project Host, n | order by Host asc`, `[[alpha 1] [beta 1]]`},
+		} {
+			result := compiler.Compile(tc.query)
+			if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+				t.Fatalf("mode=%d %s: got=%s want=%s\nSQL=%s", mode, tc.query, got, tc.want, result.SQL)
+			}
+		}
+	}
+}
+
+func TestFuzzyUnionAndViews(t *testing.T) {
+	db := openInvestigationDB(t)
+	compiler := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog()))
+	for _, tc := range []struct{ query, want string }{
+		{`union isfuzzy=true Events, Missing | count`, `[[2]]`},
+		{`union isfuzzy=true (Missing | where x > 0), (Events | project Host) | count`, `[[2]]`},
+		{`let View_1 = view () { print x=1 }; let View_2 = view () { print x=1 }; union isfuzzy=true (View_1 | where x > 0), (View_2 | where x > 0), (Absent | where x > 0) | count`, `[[2]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s %#v", tc.query, got, tc.want, result.Diagnostics)
+		}
+	}
+	for _, query := range []string{`union Events, Missing`, `union isfuzzy=true Missing, Absent`, `union isfuzzy=true Events, (Events | where nope > 1)`} {
+		if result := compiler.Compile(query); result.OK() {
+			t.Fatalf("%s accepted", query)
+		}
+	}
+}

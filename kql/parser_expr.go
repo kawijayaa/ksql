@@ -350,6 +350,17 @@ func (p *expressionParser) parseCommaExpressions(close string) []Expression {
 
 func (p *expressionParser) parseList() Expression {
 	open := p.tokens[p.position-1].Span
+	// x in (T | project c) tests membership in a tabular subquery's column.
+	if close := matchingClose(p.tokens, p.position-1); close > p.position {
+		body := p.tokens[p.position:close]
+		if hasTopLevel(body, "|") || beginsTabularSource(body) {
+			pipeline, errors := parsePipeline(body)
+			p.errors = append(p.errors, errors...)
+			p.position = close + 1
+			item := &PipelineExpression{Pipeline: pipeline, Span: tokensSpan(body)}
+			return &ListExpression{Items: []Expression{item}, Span: joinSpan(open, p.tokens[close].Span)}
+		}
+	}
 	items := p.parseCommaExpressions(")")
 	span := open
 	if len(items) > 0 {

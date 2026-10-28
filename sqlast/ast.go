@@ -187,6 +187,14 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// InSubquery tests whether Value equals a non-null Column of Query.
+type InSubquery struct {
+	Value           Expr
+	Query           Query
+	Column          string
+	CaseInsensitive bool
+}
+
 // ArrayContains tests whether the JSON array Array has an element equal to
 // Value, optionally comparing lowercase text.
 type ArrayContains struct {
@@ -265,6 +273,7 @@ func (*DatetimeAdd) exprNode()     {}
 func (*DatetimeDiff) exprNode()    {}
 func (*TimespanText) exprNode()    {}
 func (*ArrayContains) exprNode()   {}
+func (*InSubquery) exprNode()      {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

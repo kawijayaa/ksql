@@ -126,3 +126,14 @@ Names are case-sensitive, as in Kusto. An input column spelled exactly like a
 name wins; otherwise a scalar `let` with that name wins, so `let region = ...`
 is not shadowed by a column named `Region`. Column references that differ only
 in case still resolve case-insensitively for compatibility.
+
+## Tabular membership, hints, views and fuzzy unions
+
+`x in (T | project c)`, `x !in (...)`, `in~` and a tabular `let` name test
+membership in the first column of a tabular expression, lowered to an `IN`
+subquery that ignores null members. Query hints (`hint.strategy`,
+`hint.shufflekey`, `hint.num_partitions`, `hint.remote`, ...) only tune
+distributed execution and are accepted and ignored; `as hint.materialized`
+keeps its caching semantics. `let V = view () { ... }` declares a
+parameterless view, and `union isfuzzy=true` skips operands that reference
+missing tables, failing only when none exists.

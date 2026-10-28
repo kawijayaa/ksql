@@ -600,6 +600,21 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.InSubquery:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		query, err := r.query(e.Query)
+		if err != nil {
+			return "", err
+		}
+		column := r.dialect.QuoteIdentifier("ksql_in_set") + "." + r.dialect.QuoteIdentifier(e.Column)
+		element := column
+		if e.CaseInsensitive {
+			value, element = "lower("+value+")", "lower("+column+")"
+		}
+		return "(" + value + " IN (SELECT " + element + " FROM (" + query + ") AS " + r.dialect.QuoteIdentifier("ksql_in_set") + " WHERE " + column + " IS NOT NULL))", nil
 	case *sqlast.ArrayContains:
 		array, err := r.expr(e.Array)
 		if err != nil {

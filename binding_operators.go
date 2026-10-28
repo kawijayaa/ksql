@@ -19,6 +19,21 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 	left := s.expression(value.Left)
 	right := boundExpr{}
 	var members []boundExpr
+	if list, ok := value.Right.(*kql.ListExpression); ok && len(list.Items) == 1 && (op == "in" || op == "!in" || op == "in~" || op == "!in~") {
+		if pipeline, tabular := list.Items[0].(*kql.PipelineExpression); tabular {
+			return s.tabularMembership(op, left, pipeline, value.Span)
+		}
+		// in (T) names a tabular let when no column or scalar let has the name.
+		if name, ok := list.Items[0].(*kql.NameExpression); ok {
+			key := strings.ToLower(unquoteKQL(name.Name))
+			_, tabular := s.tabularLets[key]
+			_, scalar := s.scalarLets[key]
+			if tabular && !scalar && !s.hasInputName(unquoteKQL(name.Name)) {
+				pipeline := &kql.PipelineExpression{Pipeline: &kql.Pipeline{Source: kql.Source{Kind: "table", Name: name.Name, Span: name.Span}}, Span: name.Span}
+				return s.tabularMembership(op, left, pipeline, value.Span)
+			}
+		}
+	}
 	if list, ok := value.Right.(*kql.ListExpression); ok && (op == "in" || op == "!in" || op == "in~" || op == "!in~") {
 		// Bind members individually: dynamic arrays expand to their elements.
 		items := make([]sqlast.Expr, len(list.Items))
@@ -352,4 +367,33 @@ func (s *compileState) dynamicMembership(op string, left boundExpr, members []bo
 		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
 	}
 	return boundExpr{SQL: result, Type: TypeBool}, true
+}
+
+// tabularMembership lowers x in (T | project c) to an IN subquery over the
+// first column of the tabular expression. Null set members never match, so
+// !in keeps rows whose value is absent from the non-null members.
+func (s *compileState) tabularMembership(op string, left boundExpr, pipeline *kql.PipelineExpression, span kql.Span) boundExpr {
+	feature := "operator.scalar." + op
+	if left.SQL == nil {
+		return boundExpr{}
+	}
+	previousInput, previousAggregation := s.input, s.aggregationAllowed
+	relation := s.pipeline(pipeline.Pipeline)
+	s.input, s.aggregationAllowed = previousInput, previousAggregation
+	if relation.Query == nil {
+		return boundExpr{}
+	}
+	if relation.Schema.Unknown || len(relation.Schema.Columns) == 0 {
+		s.bindError("KQLB0414", span, feature, op+" with a tabular expression requires a known first column")
+		return boundExpr{}
+	}
+	if len(relation.rowDependencies) != 0 {
+		s.bindError("KQLB0414", span, feature, op+" subqueries cannot reference the outer row")
+		return boundExpr{}
+	}
+	result := sqlast.Expr(&sqlast.InSubquery{Value: left.SQL, Query: relation.Query, Column: relation.Schema.Columns[0].Name, CaseInsensitive: strings.HasSuffix(op, "~")})
+	if strings.HasPrefix(op, "!") {
+		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
+	}
+	return boundExpr{SQL: result, Type: TypeBool}
 }

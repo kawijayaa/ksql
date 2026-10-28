@@ -20,11 +20,21 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		legs = append(legs, input)
 	}
 	for _, pipeline := range spec.Inputs {
+		mark := len(s.diagnostics)
 		leg := s.pipeline(pipeline)
 		if leg.Query == nil {
+			// isfuzzy=true skips operands whose only problem is a missing table.
+			if spec.IsFuzzy && onlyMissingTables(s.diagnostics[mark:]) {
+				s.diagnostics = s.diagnostics[:mark]
+				continue
+			}
 			return Relation{}
 		}
 		legs = append(legs, leg)
+	}
+	if len(legs) == 0 {
+		s.bindError("KQLB0201", operator.Span, "operator.union", "union isfuzzy=true found no existing tables")
+		return Relation{}
 	}
 	type key struct {
 		name string
@@ -122,4 +132,18 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		queries = append(queries, &sqlast.Select{From: &sqlast.Subquery{Query: leg.Query, Alias: alias}, Projections: items})
 	}
 	return Relation{Query: &sqlast.Union{All: true, Queries: queries}, Schema: schema}
+}
+
+func onlyMissingTables(diagnostics []Diagnostic) bool {
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity != SeverityError {
+			continue
+		}
+		if diagnostic.Code != "KQLB0201" && !strings.Contains(diagnostic.Message, "unknown table") {
+			return false
+		}
+		found = true
+	}
+	return found
 }

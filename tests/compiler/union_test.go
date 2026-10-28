@@ -45,7 +45,7 @@ func TestSQLiteUnionAlignment(t *testing.T) {
 }
 
 func TestUnionDiagnostics(t *testing.T) {
-	for _, query := range []string{`union`, `print a=1 | union`, `union (print a=1),`, `union kind=bogus (print a=1)`, `union withsource=S (print a=1)`, `union isfuzzy=true (print a=1)`, `T | union U`, `print a=1 | union kind=inner (print b=2)`} {
+	for _, query := range []string{`union`, `print a=1 | union`, `union (print a=1),`, `union kind=bogus (print a=1)`, `union withsource=S (print a=1)`, `T | union U`, `print a=1 | union kind=inner (print b=2)`} {
 		t.Run(query, func(t *testing.T) {
 			result := ksql.New(dialect.SQLite()).Compile(query)
 			if result.OK() || result.SQL != "" {

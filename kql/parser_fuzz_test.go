@@ -30,3 +30,21 @@ func TestMalformedRangesReportErrors(t *testing.T) {
 		t.Fatalf("valid range: %v", errs)
 	}
 }
+
+func TestQueryHintsAreIgnored(t *testing.T) {
+	for _, query := range []string{
+		`T | summarize hint.strategy = shuffle count() by Host`,
+		`T | summarize hint.shufflekey = Host hint.num_partitions = 10 count() by Host`,
+		`T | join kind=inner hint.strategy=broadcast (U) on Host`,
+		`T | lookup hint.remote=auto (U) on Host`,
+		`T | join hint.strategy=shuffle hint.shufflekey=Host (U | summarize hint.strategy=shuffle count() by Host) on Host`,
+	} {
+		if _, errs := Parse(query); len(errs) != 0 {
+			t.Errorf("%s: %v", query, errs)
+		}
+	}
+	script, errs := Parse(`T | as hint.materialized=true X`)
+	if len(errs) != 0 || script.Statements[0].(*ExpressionStatement).Pipeline.Operators[0].Body.(AsSpec).Materialized == nil {
+		t.Fatalf("as hint.materialized must stay semantic: %v", errs)
+	}
+}

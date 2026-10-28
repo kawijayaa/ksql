@@ -152,6 +152,8 @@ type JoinSpec struct {
 type UnionSpec struct {
 	Kind   string
 	Inputs []*Pipeline
+	// IsFuzzy skips operands that reference missing tables.
+	IsFuzzy bool
 }
 type MvExpansion struct {
 	Name       string
