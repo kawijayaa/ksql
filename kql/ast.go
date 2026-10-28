@@ -69,6 +69,28 @@ type ControlStatement struct {
 	Span Span
 }
 
+// PatternStatement is declare pattern Name [= (Params)[Path] { Entries }].
+// A pattern without entries is declared empty.
+type PatternStatement struct {
+	Name    string
+	Params  []string
+	Path    string
+	HasPath bool
+	Entries []PatternEntry
+	Span    Span
+}
+
+// PatternEntry maps argument values (and a path value) to a query.
+type PatternEntry struct {
+	Args []string
+	Path string
+	Body *Pipeline
+	Span Span
+}
+
+func (*PatternStatement) statementNode()   {}
+func (s *PatternStatement) NodeSpan() Span { return s.Span }
+
 // SetStatement is set Option [= Value], a request option.
 type SetStatement struct {
 	Name  string

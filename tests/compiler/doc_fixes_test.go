@@ -94,3 +94,49 @@ func TestSetStatements(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's pattern statement examples, normalization and missing
+// references.
+func TestPatternStatements(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	country := `declare pattern country = (name:string)[state:string]
+{
+  ("USA").["New York"] = { print Capital = "Albany" };
+  ("USA").["Washington"] = { print Capital = "Olympia" };
+  ("Canada").["Alberta"] = { print Capital = "Edmonton" };
+};
+`
+	app := `declare pattern App = (applicationId:string)[scope:string]
+{
+    ('a1').['Data']    = { range x from 1 to 2 step 1 | project App = "App #1", Data = x };
+    ('a2').['Data']    = { range x from 1 to 2 step 1 | project App = "App #2", Data = 10 - x };
+};
+`
+	for _, tc := range []struct{ query, want string }{
+		{country + `country("Canada").Alberta`, `[[Edmonton]]`},
+		{country + `country('USA').["New York"]`, `[[Albany]]`},
+		{app + `union App('a2').Data, App("a1").['Data'] | order by App asc, Data asc`, `[[App #1 1] [App #1 2] [App #2 8] [App #2 9]]`},
+		{`declare pattern ip = (address:string) { ("10.10.10.10") = { print Lat=37.405992, Long=-122.078515 }; }; ip("10.10.10.10")`, `[[37.405992 -122.078515]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	for _, tc := range []struct{ query, code, message string }{
+		{`declare pattern map_ip_to_longlat; map_ip_to_longlat("10.10.10.10")`, "KQLB0109", `One or more pattern references were not declared. Detected pattern references: ["map_ip_to_longlat('10.10.10.10')"]`},
+		{app + `union App("a1").["*"] | count`, "KQLB0109", `One or more pattern references were not declared. Detected pattern references: ["App('a1').['*']"]`},
+		{`declare pattern p; declare pattern p; print 1`, "KQLB0106", ""},
+		{`declare pattern p = (a:long) { ("1") = { print 1 }; }; print 1`, "KQLP0104", ""},
+	} {
+		result := compiler.Compile(tc.query)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code || (tc.message != "" && result.Diagnostics[0].Message != tc.message) {
+			t.Fatalf("%s: diagnostics %v want %s %s", tc.query, result.Diagnostics, tc.code, tc.message)
+		}
+	}
+}

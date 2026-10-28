@@ -111,6 +111,9 @@ func (s *compileState) source(source kql.Source) Relation {
 		}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: from.SQL, To: to.SQL, Step: step.SQL, Alias: s.nextAlias()}}, Schema: Schema{Columns: []Column{{Name: source.Name, Type: columnType}}}}
 	case "expression":
+		if relation, ok := s.patternSource(source.Expr, source.Span); ok {
+			return relation
+		}
 		if call, ok := source.Expr.(*kql.CallExpression); ok {
 			if name, ok := call.Function.(*kql.NameExpression); ok {
 				if function := s.functions[strings.ToLower(unquoteKQL(name.Name))]; function != nil {

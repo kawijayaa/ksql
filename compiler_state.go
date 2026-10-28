@@ -16,6 +16,8 @@ type compileState struct {
 	pipelineDepth          int
 	scalarLets             map[string]boundExpr
 	requestOptions         map[string]kql.Expression
+	patterns               map[string]*kql.PatternStatement
+	patternDepth           int
 	tabularLets            map[string]Relation
 	functions              map[string]*boundFunction
 	aggregationAllowed     bool

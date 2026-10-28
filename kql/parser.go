@@ -78,6 +78,9 @@ func parseStatement(tokens []Token) (Statement, []ParseError) {
 		if len(tokens) > 1 && lower(tokens[1]) == "query_parameters" {
 			return parseQueryParameters(tokens)
 		}
+		if len(tokens) > 1 && lower(tokens[1]) == "pattern" {
+			return parsePattern(tokens)
+		}
 		return &ControlStatement{Kind: first, Raw: tokens, Span: span}, nil
 	case "set":
 		return parseSet(tokens)

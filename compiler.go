@@ -96,6 +96,8 @@ func (c *Compiler) Compile(source string) Result {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
 			state.bindLet(node, nil)
+		case *kql.PatternStatement:
+			state.declarePattern(node)
 		case *kql.SetStatement:
 			state.setOption(node)
 		case *kql.ControlStatement:
