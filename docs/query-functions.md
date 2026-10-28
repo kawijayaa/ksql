@@ -44,6 +44,8 @@ argument columns; wildcard parameters permit star operations but cannot name
 input columns during declaration validation. Table expressions such as
 `selectRecent((range x from 1 to 4 step 1), 3)` are supported, along with direct
 datatable arguments, lexical table capture, and nested function declarations.
+Arguments may be named. A positional argument after a named one fills the
+first parameter not yet supplied, as in Kusto's `checkLength(len=3, input)`.
 `invoke` supplies its input as the first table argument. Both scalar and table
 expansion share the resource limits described above. Exact coercion, case
 resolution, schema-dependent function analysis and engine differential testing

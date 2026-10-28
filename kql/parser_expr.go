@@ -426,7 +426,7 @@ func joinSpan(first, last Span) Span {
 
 func temporalLiteralName(name string) bool {
 	switch strings.ToLower(name) {
-	case "datetime", "date", "timespan", "time":
+	case "datetime", "date", "timespan", "time", "guid":
 		return true
 	}
 	return false

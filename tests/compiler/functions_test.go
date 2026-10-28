@@ -53,7 +53,7 @@ func TestScalarQueryFunctionDiagnostics(t *testing.T) {
 		`let f=(x:long){x}; print f("bad")`,
 		`let f=(x:long){x}; print f(x=1,x=2)`,
 		`let f=(x:long){x}; print f(other=1)`,
-		`let f=(x:long,y:long){x+y}; print f(y=1,2)`,
+		`let f=(x:long,y:long){x+y}; print f(y=1,2,3)`,
 		`let f=(x:long=1,y:long){x+y}; print 1`,
 		`let f=(x:long=1+1){x}; print 1`,
 		`let f=(x:long="bad"){x}; print 1`,

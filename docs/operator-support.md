@@ -72,7 +72,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 
 - Column-selection patterns are supported by `project-away`, `project-keep`, and `project-reorder`. Zero-column outputs remain unsupported; exact-name binding remains case-insensitive. Numeric sorting is verified for ASCII digit runs; Unicode digit collation still needs conformance coverage.
 - Schema-declared `bag_unpack` is unsupported; aggregating `mv-apply` needs a bound input schema (`KQLB0339`).
-- Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string; those distinctions remain pending.
+- Union operands may be table patterns (`View*`, `*`) over listed tables and `let` views, expanded in name order and labeled by table for `withsource`. With `isfuzzy=true`, unmatched patterns and missing tables are skipped. Zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string (`guid(...)` literals are lowercase strings); those distinctions remain pending.
 - `to typeof(datetime|timespan|guid)` converts through the application's `todatetime`/`totimespan`/`toguid` when it registers them (a numeric-affinity SQLite cast would turn `"2017-08-01"` into `2017`). Other types, or dialects without those functions, use SQL casts, which do not return KQL's null on failure.
 - `MaxInputRowsPerStage` is reserved until supported operators can enforce it
   without claiming execution guarantees. `MaxParseCaptures` bounds the

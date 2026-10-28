@@ -706,12 +706,36 @@ func parseUnion(op Operator, tokens []Token) (Operator, []ParseError) {
 			errs = append(errs, ParseError{Code: "KQLP0321", Message: "union requires a table expression", Span: op.Span})
 			continue
 		}
+		if pattern, ok := tablePattern(inputTokens); ok {
+			spec.Inputs = append(spec.Inputs, &Pipeline{Source: Source{Kind: "table", Name: pattern, Span: tokensSpan(inputTokens)}, Span: tokensSpan(inputTokens)})
+			continue
+		}
 		input, inputErrs := parsePipeline(inputTokens)
 		spec.Inputs = append(spec.Inputs, input)
 		errs = append(errs, inputErrs...)
 	}
 	op.Body = spec
 	return op, errs
+}
+
+// tablePattern joins a union operand written as adjacent name and *
+// tokens, such as View* or *_Logs, into a table pattern.
+func tablePattern(tokens []Token) (string, bool) {
+	var pattern strings.Builder
+	wildcard := false
+	for i, token := range tokens {
+		if i > 0 && tokens[i-1].Span.Offset+tokens[i-1].Span.Length != token.Span.Offset {
+			return "", false
+		}
+		switch {
+		case token.Text == "*":
+			wildcard = true
+		case token.Kind != IdentifierToken:
+			return "", false
+		}
+		pattern.WriteString(token.Text)
+	}
+	return pattern.String(), wildcard
 }
 
 func appendExpressions(destination []Expression, tokens []Token, errs []ParseError) ([]Expression, []ParseError) {

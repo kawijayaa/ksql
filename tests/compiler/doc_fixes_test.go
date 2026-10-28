@@ -333,3 +333,39 @@ func TestSlidingWindowCountsAndTypedExpansion(t *testing.T) {
 		t.Errorf("spaced datetime literal: %v\n%s", spaced.Diagnostics, spaced.SQL)
 	}
 }
+
+// union table patterns over views, positional arguments after named ones,
+// and guid literals.
+func TestUnionPatternsArgumentsAndGuids(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	views := "let View_1 = view () { print x=1 }; let View_2 = view () { print x=2 }; let OtherView_1 = view () { print x=3 };\n"
+	for _, tc := range []struct{ query, want string }{
+		{views + `union isfuzzy=true View*, SomeView*, OtherView* | count`, `[[3]]`},
+		{views + `union withsource=T View* | order by T asc`, `[[View_1 1] [View_2 2]]`},
+		{views + `union * | summarize sum(x)`, `[[6]]`},
+		{`let f = (a:long, b:long, c:long = 100) { a - b + c }; print f(b=1, 5), f(c=0, 9, 3)`, `[[104 6]]`},
+		{`print g = guid({12E8B78D-55B4-46AE-B068-26D7A0080254})`, `[[12e8b78d-55b4-46ae-b068-26d7a0080254]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		views + `union SomeView*`,
+		`print guid(12e8b78d)`,
+		`let f = (a:long) { a }; print f(a=1, 2)`,
+	} {
+		if result := compiler.Compile(query); result.OK() {
+			t.Errorf("%s: want an error", query)
+		}
+	}
+}

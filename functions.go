@@ -244,8 +244,15 @@ func (s *compileState) callFunctionValue(function *boundFunction, call *kql.Call
 			}
 			expression = argument.Value
 		} else if named {
-			s.bindError("KQLB0117", expression.NodeSpan(), "statement.let", "positional arguments must precede named arguments")
-			return functionValue{}
+			// Kusto fills the first unsupplied parameter, as in
+			// checkLength(len=3, input).
+			index = -1
+			for i := range function.parameters {
+				if !supplied[i] {
+					index = i
+					break
+				}
+			}
 		}
 		if index < 0 || supplied[index] {
 			s.bindError("KQLB0117", expression.NodeSpan(), "statement.let", "unknown or duplicate function argument")

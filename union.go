@@ -21,7 +21,31 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		legs = append(legs, input)
 		labels = append(labels, "union_arg0")
 	}
-	for _, pipeline := range spec.Inputs {
+	inputs := spec.Inputs
+	patternLabels := map[*kql.Pipeline]string{}
+	for i := 0; i < len(inputs); i++ {
+		pipeline := inputs[i]
+		if len(pipeline.Operators) > 0 || pipeline.Source.Kind != "table" || !strings.Contains(pipeline.Source.Name, "*") {
+			continue
+		}
+		// A table pattern expands to each matching table or view.
+		mark := len(s.diagnostics)
+		names, ok := s.resolveTablePatterns([]string{pipeline.Source.Name}, true, pipeline.Span, "operator.union")
+		if !ok {
+			if !spec.IsFuzzy {
+				return Relation{}
+			}
+			s.diagnostics = s.diagnostics[:mark]
+		}
+		expanded := make([]*kql.Pipeline, len(names))
+		for j, name := range names {
+			expanded[j] = &kql.Pipeline{Source: kql.Source{Kind: "table", Name: searchName(name), Span: pipeline.Span}, Span: pipeline.Span}
+			patternLabels[expanded[j]] = name
+		}
+		inputs = append(append(append([]*kql.Pipeline{}, inputs[:i]...), expanded...), inputs[i+1:]...)
+		i += len(expanded) - 1
+	}
+	for _, pipeline := range inputs {
 		mark := len(s.diagnostics)
 		leg := s.pipeline(pipeline)
 		if leg.Query == nil {
@@ -34,7 +58,9 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		}
 		// withsource reports a bare table's name, else union_argN.
 		label := fmt.Sprintf("union_arg%d", len(legs))
-		if len(pipeline.Operators) == 0 && pipeline.Source.Kind == "table" {
+		if name, ok := patternLabels[pipeline]; ok {
+			label = name
+		} else if len(pipeline.Operators) == 0 && pipeline.Source.Kind == "table" {
 			label = unquoteKQL(pipeline.Source.Name)
 		}
 		// A leg ending in "as Name" is labeled Name.

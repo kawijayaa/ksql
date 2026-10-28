@@ -47,7 +47,18 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 				return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: TypeString}
 			}
 		}
-		s.bindError("KQLB0413", value.Span, "function."+function, function+"() takes null; use tostring() to convert values")
+		// guid(12e8b78d-55b4-46ae-b068-26d7a0080254) is a guid literal; guids
+		// are strings in KSQL, in Kusto's lowercase form.
+		if function == "guid" && len(value.Args) == 1 {
+			if literal, ok := value.Args[0].(*kql.LiteralExpression); ok && literal.Kind == kql.StringToken {
+				if text := strings.Trim(unquoteKQL(literal.Text), "{}"); guidText.MatchString(text) {
+					return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: strings.ToLower(text)}, Type: TypeString}
+				}
+				s.bindError("KQLB0413", value.Span, "function.guid", "guid literal requires 32 hexadecimal digits in 8-4-4-4-12 form")
+				return boundExpr{}
+			}
+		}
+		s.bindError("KQLB0413", value.Span, "function."+function, function+"() takes null or a literal; use tostring() to convert values")
 		return boundExpr{}
 	}
 	if function == "typeof" {
@@ -448,4 +459,6 @@ func sqliteJSONElement(value sqlast.Expr, kind ScalarType) sqlast.Expr {
 
 // spacedDate matches a date written with spaced dashes, as in Microsoft's
 // datetime(2017 - 08 - 01) examples, which Kusto accepts.
+var guidText = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
+
 var spacedDate = regexp.MustCompile(`^\s*(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})\b`)
