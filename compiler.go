@@ -22,6 +22,7 @@ type Compiler struct {
 	limits             Limits
 	management         *ManagementCatalog
 	parameters         *queryParameterValues
+	bagKeys            BagKeysResolver
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.

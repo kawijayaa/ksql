@@ -150,6 +150,7 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 - [Key-value extraction with `parse-kv`](docs/parse-kv-operator.md)
 - [Window functions and serialization](docs/window-functions.md)
 - [Timespans and datetime arithmetic](docs/timespans.md)
+- [Unpacking property bags with `evaluate bag_unpack`](docs/bag-unpack.md)
 - [Visualization annotations with `render`](docs/render-operator.md)
 - [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
 - [Quoted column declarations and aliases](docs/quoted-names.md)

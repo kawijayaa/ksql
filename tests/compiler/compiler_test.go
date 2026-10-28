@@ -50,7 +50,7 @@ func TestUnsupportedFeatureIsDiagnostic(t *testing.T) {
 	if result.OK() || result.SQL != "" {
 		t.Fatalf("Compile() = %#v", result)
 	}
-	if got := result.Diagnostics[0].Feature; got != "operator.evaluate" {
+	if got := result.Diagnostics[0].Feature; got != "plugin.python" {
 		t.Fatalf("feature = %q", got)
 	}
 }
