@@ -122,3 +122,18 @@ func TestTimespanExportedHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestTypeofLiteral(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithTypedFunction("kind_of", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		return args[0], nil
+	}))
+	result := compiler.Compile(`print a=kind_of(typeof(real)), b=kind_of(typeof(Long)), c=kind_of(typeof(timespan)), d=kind_of(typeof(guid))`)
+	if !result.OK() || result.SQL != `SELECT 'real' AS "a", 'long' AS "b", 'timespan' AS "c", 'guid' AS "d"` {
+		t.Fatalf("%#v %s", result.Diagnostics, result.SQL)
+	}
+	for _, query := range []string{`print typeof()`, `print typeof(widget)`, `print typeof("real")`, `print typeof(real, long)`} {
+		if result := compiler.Compile(query); result.OK() || result.Diagnostics[0].Code != "KQLB0413" {
+			t.Fatalf("%s: %#v", query, result.Diagnostics)
+		}
+	}
+}

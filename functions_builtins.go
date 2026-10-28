@@ -25,6 +25,25 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
+	if function == "typeof" {
+		// typeof(T) is a type literal, kept as an unbound string so
+		// application rules such as extract can read the requested type.
+		var name *kql.NameExpression
+		ok := len(value.Args) == 1
+		if ok {
+			name, ok = value.Args[0].(*kql.NameExpression)
+		}
+		if !ok {
+			s.bindError("KQLB0413", value.Span, "function.typeof", "typeof requires one scalar type name")
+			return boundExpr{}
+		}
+		kind := parseScalarType(name.Name)
+		if kind == TypeUnknown && !strings.EqualFold(name.Name, "guid") && !strings.EqualFold(name.Name, "decimal") {
+			s.bindError("KQLB0413", value.Span, "function.typeof", "unknown scalar type "+name.Name)
+			return boundExpr{}
+		}
+		return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: strings.ToLower(name.Name)}, Type: TypeString}
+	}
 	if function == "timespan" || function == "time" {
 		if len(value.Args) != 1 {
 			return s.arity(value, function, 1)
