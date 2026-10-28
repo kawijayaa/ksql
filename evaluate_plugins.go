@@ -199,20 +199,9 @@ func (s *compileState) ipLookup(input Relation, spec kql.EvaluateSpec, feature, 
 	if len(args) < 3 {
 		return fail(spec.Plugin + " requires a lookup table, a source key and a lookup key")
 	}
-	lookup, ok := s.tabularLetValue(args[0])
+	lookup, ok := s.lookupTable(args[0], spec, feature)
 	if !ok {
-		if name, isName := args[0].(*kql.NameExpression); isName {
-			lookup = s.source(kql.Source{Kind: "table", Name: name.Name, Span: name.Span})
-		}
-	}
-	if lookup.Query == nil {
-		if ok {
-			return Relation{}
-		}
-		return fail(spec.Plugin + " lookup table must be a table or tabular expression")
-	}
-	if lookup.Schema.Unknown {
-		return fail(spec.Plugin + " requires a lookup table with a known schema")
+		return Relation{}
 	}
 	columnName := func(expression kql.Expression, schema Schema, side string) (Column, bool) {
 		name, ok := expression.(*kql.NameExpression)
@@ -241,7 +230,24 @@ func (s *compileState) ipLookup(input Relation, spec kql.EvaluateSpec, feature, 
 		extra = append(extra, left)
 		extraNames[strings.ToLower(left.Name)] = true
 	}
-	// Prefix the lookup's columns so both sides bind unambiguously.
+	predicate := func(prefix string) kql.Expression {
+		var predicate kql.Expression = &kql.CallExpression{Function: &kql.NameExpression{Name: matcher}, Args: []kql.Expression{
+			&kql.NameExpression{Name: searchName(sourceKey.Name)}, &kql.NameExpression{Name: searchName(prefix + lookupKey.Name)},
+		}}
+		for _, column := range extra {
+			predicate = &kql.BinaryExpression{Left: predicate, Operator: "and", Right: &kql.BinaryExpression{
+				Left: &kql.NameExpression{Name: searchName(column.Name)}, Operator: "==", Right: &kql.NameExpression{Name: searchName(prefix + column.Name)},
+			}}
+		}
+		return predicate
+	}
+	return s.lookupJoin(input, lookup, predicate, unmatched, extraNames, spec, feature)
+}
+
+// lookupJoin joins input rows to the lookup rows satisfying predicate, built
+// over the input's columns and the lookup's columns under a prefix. The
+// result has the input's columns, then the lookup's except dropped ones.
+func (s *compileState) lookupJoin(input, lookup Relation, predicate func(prefix string) kql.Expression, unmatched bool, dropped map[string]bool, spec kql.EvaluateSpec, feature string) Relation {
 	const prefix = "__ksql_lookup_"
 	leftAlias, rightAlias := s.nextAlias(), s.nextAlias()
 	renamed := &sqlast.Select{From: &sqlast.Subquery{Query: lookup.Query, Alias: s.nextAlias()}}
@@ -250,23 +256,16 @@ func (s *compileState) ipLookup(input Relation, spec kql.EvaluateSpec, feature, 
 		renamed.Projections = append(renamed.Projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: prefix + column.Name})
 		combined.Columns = append(combined.Columns, Column{Name: prefix + column.Name, Type: column.Type})
 	}
-	var predicate kql.Expression = &kql.CallExpression{Function: &kql.NameExpression{Name: matcher}, Args: []kql.Expression{
-		&kql.NameExpression{Name: searchName(sourceKey.Name)}, &kql.NameExpression{Name: searchName(prefix + lookupKey.Name)},
-	}}
-	for _, column := range extra {
-		predicate = &kql.BinaryExpression{Left: predicate, Operator: "and", Right: &kql.BinaryExpression{
-			Left: &kql.NameExpression{Name: searchName(column.Name)}, Operator: "==", Right: &kql.NameExpression{Name: searchName(prefix + column.Name)},
-		}}
-	}
 	previous := s.input
 	s.input = combined
-	bound := s.expression(predicate)
+	bound := s.expression(predicate(prefix))
 	s.input = previous
 	if bound.SQL == nil {
 		return Relation{}
 	}
 	if bound.Type != TypeBool && bound.Type != TypeUnknown {
-		return fail(matcher + " must return a Boolean")
+		s.bindError("KQLB0417", spec.Span, feature, spec.Plugin+" match must be Boolean")
+		return Relation{}
 	}
 	kind := "INNER"
 	if unmatched {
@@ -284,15 +283,129 @@ func (s *compileState) ipLookup(input Relation, spec kql.EvaluateSpec, feature, 
 		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{leftAlias, column.Name}}, Alias: column.Name})
 	}
 	for _, column := range lookup.Schema.Columns {
-		if extraNames[strings.ToLower(column.Name)] {
+		if dropped[strings.ToLower(column.Name)] {
 			continue
 		}
 		name := column.Name
-		if containsColumn(schema.Columns, name) {
-			name = fmt.Sprintf("%s1", name)
+		for suffix := 1; containsColumn(schema.Columns, name); suffix++ {
+			name = fmt.Sprintf("%s%d", column.Name, suffix)
 		}
 		projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{rightAlias, prefix + column.Name}}, Alias: name})
 		schema.Columns = append(schema.Columns, Column{Name: name, Type: column.Type})
 	}
 	return Relation{Query: &sqlast.Select{From: join, Projections: projections}, Schema: schema}
+}
+
+// lookupTable resolves a plugin's lookup table argument.
+func (s *compileState) lookupTable(expression kql.Expression, spec kql.EvaluateSpec, feature string) (Relation, bool) {
+	lookup, ok := s.tabularLetValue(expression)
+	if !ok {
+		if name, isName := expression.(*kql.NameExpression); isName {
+			lookup, ok = s.source(kql.Source{Kind: "table", Name: name.Name, Span: name.Span}), true
+		}
+	}
+	if !ok {
+		s.bindError("KQLB0417", spec.Span, feature, spec.Plugin+" lookup table must be a table or tabular expression")
+		return Relation{}, false
+	}
+	if lookup.Query == nil {
+		return Relation{}, false
+	}
+	if lookup.Schema.Unknown {
+		s.bindError("KQLB0417", spec.Span, feature, spec.Plugin+" requires a lookup table with a known schema")
+		return Relation{}, false
+	}
+	return lookup, true
+}
+
+// geoLookup implements geo_polygon_lookup and geo_line_lookup: a lookup join
+// on point-in-polygon (or distance to the polygon within radius) and on
+// distance to a line within radius. Options are positional or named.
+func (s *compileState) geoLookup(input Relation, spec kql.EvaluateSpec, feature string, line bool) Relation {
+	fail := func(message string) Relation {
+		s.bindError("KQLB0417", spec.Span, feature, message)
+		return Relation{}
+	}
+	if input.Schema.Unknown {
+		return fail(spec.Plugin + " requires a known input schema")
+	}
+	options := []string{"radius", "return_unmatched", "lookup_area_radius", "return_lookup_key"}
+	var positional []kql.Expression
+	named := map[string]kql.Expression{}
+	for _, arg := range spec.Args {
+		if option, ok := arg.(*kql.NamedExpression); ok {
+			named[strings.ToLower(option.Name)] = option.Value
+			continue
+		}
+		positional = append(positional, arg)
+	}
+	if len(positional) < 4 {
+		return fail(spec.Plugin + " requires a lookup table, a lookup key, a longitude and a latitude")
+	}
+	for i, value := range positional[4:] {
+		if i >= len(options) {
+			return fail(spec.Plugin + " has too many arguments")
+		}
+		named[options[i]] = value
+	}
+	for name := range named {
+		known := false
+		for _, option := range options {
+			known = known || option == name
+		}
+		if !known {
+			return fail("unknown " + spec.Plugin + " option " + name)
+		}
+	}
+	flag := func(name string) (bool, bool) {
+		value, ok := named[name]
+		if !ok {
+			return false, true
+		}
+		literal, isLiteral := value.(*kql.LiteralExpression)
+		if !isLiteral || (!strings.EqualFold(literal.Text, "true") && !strings.EqualFold(literal.Text, "false")) {
+			return false, false
+		}
+		return strings.EqualFold(literal.Text, "true"), true
+	}
+	unmatched, okUnmatched := flag("return_unmatched")
+	returnKey, okKey := flag("return_lookup_key")
+	if !okUnmatched || !okKey {
+		return fail("return_unmatched and return_lookup_key must be true or false")
+	}
+	radius, hasRadius := named["radius"]
+	if line && !hasRadius {
+		return fail("geo_line_lookup requires a radius")
+	}
+	lookup, ok := s.lookupTable(positional[0], spec, feature)
+	if !ok {
+		return Relation{}
+	}
+	key, ok := positional[1].(*kql.NameExpression)
+	if !ok {
+		return fail(spec.Plugin + " lookup key must be a column")
+	}
+	keyColumn, _, found, _ := lookup.Schema.Lookup(unquoteKQL(key.Name))
+	if !found {
+		return fail("unknown lookup column " + key.Name)
+	}
+	longitude, latitude := positional[2], positional[3]
+	predicate := func(prefix string) kql.Expression {
+		shape := &kql.NameExpression{Name: searchName(prefix + keyColumn.Name)}
+		call := func(name string) *kql.CallExpression {
+			return &kql.CallExpression{Function: &kql.NameExpression{Name: name}, Args: []kql.Expression{longitude, latitude, shape}}
+		}
+		switch {
+		case line:
+			return &kql.BinaryExpression{Left: call("geo_distance_point_to_line"), Operator: "<=", Right: radius}
+		case hasRadius:
+			return &kql.BinaryExpression{Left: call("geo_distance_point_to_polygon"), Operator: "<=", Right: radius}
+		}
+		return call("geo_point_in_polygon")
+	}
+	dropped := map[string]bool{}
+	if !returnKey {
+		dropped[strings.ToLower(keyColumn.Name)] = true
+	}
+	return s.lookupJoin(input, lookup, predicate, unmatched, dropped, spec, feature)
 }
