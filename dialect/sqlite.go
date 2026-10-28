@@ -118,6 +118,16 @@ func (sqlite) StringMatch(value, pattern, mode string) (string, bool) {
 	}
 	return "(instr(" + value + ", " + pattern + ") > 0)", true
 }
+
+// ArrayContains binds each operand once; aliases keep data columns named
+// value or key from resolving to json_each's own columns.
+func (sqlite) ArrayContains(array, value string, caseInsensitive bool) (string, bool) {
+	element, needle := "ksql_in_values.value", "ksql_in.needle"
+	if caseInsensitive {
+		element, needle = "lower("+element+")", "lower("+needle+")"
+	}
+	return "EXISTS (SELECT 1 FROM (SELECT " + array + " AS haystack, " + value + " AS needle) AS ksql_in, json_each(CASE WHEN json_valid(ksql_in.haystack) THEN ksql_in.haystack END) AS ksql_in_values WHERE " + element + " = " + needle + ")", true
+}
 func (d sqlite) DatetimeAdd(datetime, ticks string) (string, bool) {
 	if d.datetimeAddFunction == "" {
 		return "", false

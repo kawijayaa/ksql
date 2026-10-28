@@ -289,11 +289,7 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
 		}
-		if argTypes[0] == TypeTimespan {
-			return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.TimespanText{Value: args[0]}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}, Type: TypeString}
-		}
-		// KQL strings have no null: tostring of a null value is empty.
-		return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.Cast{Expr: args[0], Type: "VARCHAR"}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}, Type: TypeString}
+		return boundExpr{SQL: textOf(args[0], argTypes[0]), Type: TypeString}
 	case "toint", "tolong", "toreal", "todouble", "todatetime", "todecimal", "tobool", "toboolean", "toguid":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
@@ -301,7 +297,12 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		types := map[string]string{"toint": "INTEGER", "tolong": "BIGINT", "toreal": "DOUBLE PRECISION", "todouble": "DOUBLE PRECISION", "todatetime": "TIMESTAMP", "todecimal": "DECIMAL", "tobool": "BOOLEAN", "toboolean": "BOOLEAN", "toguid": "UUID"}
 		return boundExpr{SQL: &sqlast.Cast{Expr: args[0], Type: types[function], Safe: true}, Type: functionType(function, argTypes)}
 	case "strcat":
-		return boundExpr{SQL: &sqlast.Call{Name: "concat", Args: args}, Type: TypeString}
+		// strcat converts each argument with tostring, so nulls are empty.
+		parts := make([]sqlast.Expr, len(args))
+		for i, arg := range args {
+			parts[i] = textOf(arg, argTypes[i])
+		}
+		return boundExpr{SQL: &sqlast.Call{Name: "concat", Args: parts}, Type: TypeString}
 	case "strlen":
 		return boundExpr{SQL: &sqlast.Call{Name: "length", Args: args}, Type: TypeLong}
 	case "tolower":
@@ -332,7 +333,12 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
 		return boundExpr{}
 	case "abs", "ceiling", "ceil", "floor", "round", "pow", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sign":
-		return boundExpr{SQL: &sqlast.Call{Name: function, Args: args}, Type: functionType(function, argTypes)}
+		name := function
+		if name == "log" {
+			// KQL log is the natural logarithm; SQL log is base 10.
+			name = "ln"
+		}
+		return boundExpr{SQL: &sqlast.Call{Name: name, Args: args}, Type: functionType(function, argTypes)}
 	default:
 		s.error("KQLL0503", value.Span, "function."+function, "function "+function+" is recognized syntactically but has no safe SQL mapping")
 		return boundExpr{}
@@ -373,4 +379,22 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		}
 	}
 	return TypeUnknown
+}
+
+// textOf converts a value as KQL tostring does: Booleans are true/false,
+// timespans use [-][d.]hh:mm:ss[.fffffff], and null becomes an empty string.
+func textOf(value sqlast.Expr, kind ScalarType) sqlast.Expr {
+	text := sqlast.Expr(&sqlast.Cast{Expr: value, Type: "VARCHAR"})
+	switch kind {
+	case TypeString:
+		text = value
+	case TypeTimespan:
+		text = &sqlast.TimespanText{Value: value}
+	case TypeBool:
+		text = &sqlast.Case{Branches: []sqlast.When{
+			{Condition: value, Result: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "true"}},
+			{Condition: &sqlast.Unary{Operator: "NOT ", Operand: value}, Result: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: "false"}},
+		}}
+	}
+	return &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{text, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}
 }

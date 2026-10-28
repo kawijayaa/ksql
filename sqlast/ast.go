@@ -187,6 +187,13 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// ArrayContains tests whether the JSON array Array has an element equal to
+// Value, optionally comparing lowercase text.
+type ArrayContains struct {
+	Array, Value    Expr
+	CaseInsensitive bool
+}
+
 // DatetimeAdd adds Ticks (100ns units) to Datetime.
 type DatetimeAdd struct{ Datetime, Ticks Expr }
 
@@ -257,6 +264,7 @@ func (*StringMatch) exprNode()     {}
 func (*DatetimeAdd) exprNode()     {}
 func (*DatetimeDiff) exprNode()    {}
 func (*TimespanText) exprNode()    {}
+func (*ArrayContains) exprNode()   {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

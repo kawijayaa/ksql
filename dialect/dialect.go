@@ -600,6 +600,23 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.ArrayContains:
+		array, err := r.expr(e.Array)
+		if err != nil {
+			return "", err
+		}
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			ArrayContains(array, value string, caseInsensitive bool) (string, bool)
+		}); ok {
+			if result, supported := capability.ArrayContains(array, value, e.CaseInsensitive); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s cannot test dynamic array membership", r.dialect.Name())
 	case *sqlast.DatetimeAdd:
 		datetime, err := r.expr(e.Datetime)
 		if err != nil {

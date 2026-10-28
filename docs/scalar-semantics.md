@@ -100,3 +100,11 @@ and `\` are ordinary characters, and the `_cs` forms are case-sensitive.
 Case-insensitive forms lowercase both operands with the database's `lower`;
 SQLite's `lower` folds only ASCII letters. Other dialects use `LIKE` with
 escaped wildcards and depend on the column collation for case sensitivity.
+
+## Conversions, strcat and membership
+
+`tostring(bool)` is `true` or `false`, and `strcat` converts each argument the
+same way, so null arguments contribute empty strings. `log` is the natural
+logarithm (SQL `ln`). `in`, `!in`, `in~` and `!in~` expand dynamic array
+members element by element, alongside scalar members; on SQLite this uses
+`json_each`, with invalid JSON treated as an empty array.

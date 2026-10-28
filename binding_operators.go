@@ -18,8 +18,21 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 	op := strings.ToLower(value.Operator)
 	left := s.expression(value.Left)
 	right := boundExpr{}
-	if !isTermOperator(op) {
+	var members []boundExpr
+	if list, ok := value.Right.(*kql.ListExpression); ok && (op == "in" || op == "!in" || op == "in~" || op == "!in~") {
+		// Bind members individually: dynamic arrays expand to their elements.
+		items := make([]sqlast.Expr, len(list.Items))
+		for i, item := range list.Items {
+			member := s.expression(item)
+			members = append(members, member)
+			items[i] = member.SQL
+		}
+		right = boundExpr{SQL: &sqlast.List{Items: items}, Type: TypeDynamic}
+	} else if !isTermOperator(op) {
 		right = s.expression(value.Right)
+	}
+	if expanded, ok := s.dynamicMembership(op, left, members); ok {
+		return expanded
 	}
 	if op == "and" || op == "or" {
 		for _, operand := range []boundExpr{left, right} {
@@ -292,4 +305,51 @@ func isAlphaNumeric(value string) bool {
 		}
 	}
 	return value != ""
+}
+
+// dynamicMembership lowers in/!in/in~/!in~ when a member is a dynamic array,
+// testing scalar members directly and array members element by element.
+func (s *compileState) dynamicMembership(op string, left boundExpr, members []boundExpr) (boundExpr, bool) {
+	dynamic := false
+	for _, member := range members {
+		dynamic = dynamic || member.Type == TypeDynamic
+	}
+	if !dynamic || left.SQL == nil {
+		return boundExpr{}, false
+	}
+	insensitive := strings.HasSuffix(op, "~")
+	var scalars []sqlast.Expr
+	var result sqlast.Expr
+	add := func(part sqlast.Expr) {
+		if result == nil {
+			result = part
+		} else {
+			result = &sqlast.Binary{Left: result, Operator: "OR", Right: part}
+		}
+	}
+	for _, member := range members {
+		if member.SQL == nil {
+			return boundExpr{}, true
+		}
+		if member.Type == TypeDynamic {
+			add(&sqlast.ArrayContains{Array: member.SQL, Value: left.SQL, CaseInsensitive: insensitive})
+			continue
+		}
+		if insensitive {
+			scalars = append(scalars, &sqlast.Call{Name: "lower", Args: []sqlast.Expr{member.SQL}})
+		} else {
+			scalars = append(scalars, member.SQL)
+		}
+	}
+	if len(scalars) > 0 {
+		needle := left.SQL
+		if insensitive {
+			needle = &sqlast.Call{Name: "lower", Args: []sqlast.Expr{needle}}
+		}
+		add(&sqlast.Binary{Left: needle, Operator: "IN", Right: &sqlast.List{Items: scalars}})
+	}
+	if strings.HasPrefix(op, "!") {
+		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
+	}
+	return boundExpr{SQL: result, Type: TypeBool}, true
 }
