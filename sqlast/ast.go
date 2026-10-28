@@ -173,7 +173,13 @@ type Window struct {
 	// Cumulative frames the window from the partition start to the current
 	// row, so ordering ties never aggregate peer rows.
 	Cumulative bool
+	// Rows, when set, frames the window from Preceding rows before to
+	// Following rows after the current row.
+	Rows *RowsFrame
 }
+
+// RowsFrame is ROWS BETWEEN Preceding PRECEDING AND Following FOLLOWING.
+type RowsFrame struct{ Preceding, Following int64 }
 type List struct{ Items []Expr }
 type Case struct {
 	Branches []When

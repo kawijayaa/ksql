@@ -18,3 +18,13 @@ id, record and the referenced columns of earlier steps. Steps are limited to
 order, or its current order when it has none.
 
 Reference: [scan operator](https://learn.microsoft.com/en-us/kusto/query/scan-operator).
+
+## row_window_session
+
+`extend Name = row_window_session(Expr, MaxDistanceFromFirst, MaxDistanceBetweenNeighbors [, Restart])`
+is lowered through a one-step scan: the expression and restart condition are
+extended first (so `Restart` may use `prev()`), then the scan starts a new
+session when there is no previous session or value, when `Expr` reaches the
+session start plus `MaxDistanceFromFirst` or the previous value plus
+`MaxDistanceBetweenNeighbors`, or on restart. It must be a named `extend`
+item (`KQLB0361`).

@@ -17,4 +17,9 @@ Besides `bag_unpack` (see bag-unpack.md), `evaluate` supports:
   / `ipv6_is_in_range`, plus equal extra keys; `return_unmatched = true`
   keeps unmatched rows with null lookup columns.
 
+- `rows_near(Condition, NumRows [, RowsAfter])`: the rows within `NumRows`
+  rows before (or `RowsAfter` after) a matching row, in serialized order,
+  with a sliding `ROWS BETWEEN` window; row counts are constants up to
+  1048576.
+
 Other plugins report `KQLL0391`.

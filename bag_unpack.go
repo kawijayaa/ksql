@@ -39,6 +39,8 @@ func (s *compileState) evaluate(input Relation, operator kql.Operator) Relation 
 		return s.bagUnpack(input, spec, feature)
 	case "narrow":
 		return s.narrow(input, spec, feature)
+	case "rows_near":
+		return s.rowsNear(input, spec, feature)
 	case "pivot":
 		return s.pivot(input, spec, operator, feature)
 	case "ipv4_lookup":

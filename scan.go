@@ -539,3 +539,122 @@ func substituteIdentifiers(expr sqlast.Expr, replace func(string) (sqlast.Expr, 
 	}
 	return copyValue(reflect.ValueOf(&expr).Elem()).Interface().(sqlast.Expr)
 }
+
+// rowWindowSession lowers extend items Name = row_window_session(Expr,
+// MaxDistanceFromFirst, MaxDistanceBetweenNeighbors [, Restart]) through
+// scan: the inputs are extended first (so Restart may use prev()), then a
+// one-step scan carries the session start and the previous value.
+func (s *compileState) rowWindowSession(input Relation, operator kql.Operator) (Relation, bool) {
+	spec, ok := operator.Body.(kql.ExpressionSpec)
+	if !ok {
+		return Relation{}, false
+	}
+	found := false
+	for _, expression := range spec.Expressions {
+		if call, ok := rowWindowSessionCall(expression); ok && call != nil {
+			found = true
+		}
+	}
+	if !found {
+		return Relation{}, false
+	}
+	relation := input
+	var pending []kql.Expression
+	flush := func() {
+		if len(pending) > 0 && relation.Query != nil {
+			relation = s.serializedAfter(relation, s.operator(relation, kql.Operator{Kind: "extend", Body: kql.ExpressionSpec{Expressions: pending}, Span: operator.Span}), operator)
+			pending = nil
+		}
+	}
+	for index, expression := range spec.Expressions {
+		named, isNamed := expression.(*kql.NamedExpression)
+		call, ok := rowWindowSessionCall(expression)
+		if !ok || call == nil {
+			pending = append(pending, expression)
+			continue
+		}
+		if !isNamed {
+			s.bindError("KQLB0361", call.Span, "function.row_window_session", "row_window_session requires a column name: Name = row_window_session(...)")
+			return Relation{}, true
+		}
+		if len(call.Args) < 3 || len(call.Args) > 4 {
+			s.bindError("KQLB0361", call.Span, "function.row_window_session", "row_window_session requires Expr, MaxDistanceFromFirst, MaxDistanceBetweenNeighbors and an optional Restart")
+			return Relation{}, true
+		}
+		flush()
+		if relation.Query == nil {
+			return Relation{}, true
+		}
+		value := fmt.Sprintf("__rws_value_%d", index)
+		restart := fmt.Sprintf("__rws_restart_%d", index)
+		previous := fmt.Sprintf("__rws_previous_%d", index)
+		var restartValue kql.Expression = &kql.LiteralExpression{Text: "false", Kind: kql.IdentifierToken}
+		if len(call.Args) == 4 {
+			restartValue = call.Args[3]
+		}
+		relation = s.serializedAfter(relation, s.operator(relation, kql.Operator{Kind: "extend", Body: kql.ExpressionSpec{Expressions: []kql.Expression{
+			&kql.NamedExpression{Name: value, Value: call.Args[0]},
+			&kql.NamedExpression{Name: restart, Value: restartValue},
+		}}, Span: operator.Span}), operator)
+		if relation.Query == nil {
+			return Relation{}, true
+		}
+		if column, _, found, _ := relation.Schema.Lookup(value); found && column.Type != TypeDateTime && column.Type != TypeUnknown {
+			s.bindError("KQLB0361", call.Span, "function.row_window_session", "row_window_session requires a datetime expression")
+			return Relation{}, true
+		}
+		name := func(text string) *kql.NameExpression { return &kql.NameExpression{Name: text} }
+		ref := func(text string) *kql.NameExpression { return &kql.NameExpression{Name: "s." + text} }
+		isnull := func(expression kql.Expression) kql.Expression {
+			return &kql.CallExpression{Function: name("isnull"), Args: []kql.Expression{expression}}
+		}
+		or := func(left, right kql.Expression) kql.Expression {
+			return &kql.BinaryExpression{Left: left, Operator: "or", Right: right}
+		}
+		// A new session starts without a previous session or value, at or
+		// beyond either distance, or on restart.
+		target := unquoteKQL(named.Name)
+		fromFirst := &kql.BinaryExpression{Left: name(value), Operator: ">=", Right: &kql.BinaryExpression{Left: ref(searchName(target)), Operator: "+", Right: call.Args[1]}}
+		fromNeighbor := &kql.BinaryExpression{Left: name(value), Operator: ">=", Right: &kql.BinaryExpression{Left: ref(previous), Operator: "+", Right: call.Args[2]}}
+		starts := or(or(or(or(isnull(ref(searchName(target))), isnull(ref(previous))), fromFirst), fromNeighbor), name(restart))
+		session := &kql.CallExpression{Function: name("iff"), Args: []kql.Expression{starts, name(value), ref(searchName(target))}}
+		scan := kql.ScanSpec{
+			Declares: []kql.ScanDeclare{{Name: target, Type: "datetime"}, {Name: previous, Type: "datetime"}},
+			Steps: []kql.ScanStep{{Name: "s", Output: "all", Condition: &kql.LiteralExpression{Text: "true", Kind: kql.IdentifierToken},
+				Assignments: []*kql.NamedExpression{{Name: target, Value: session}, {Name: previous, Value: name(value)}}}},
+		}
+		if _, _, exists, _ := relation.Schema.Lookup(target); exists {
+			// Replacing a column: drop it so scan can declare it.
+			relation = s.operator(relation, kql.Operator{Kind: "project-away", Body: kql.ExpressionSpec{Expressions: []kql.Expression{name(searchName(target))}}, Span: operator.Span})
+			if relation.Query == nil {
+				return Relation{}, true
+			}
+		}
+		relation = s.scan(relation, kql.Operator{Kind: "scan", Body: scan, Span: operator.Span})
+		if relation.Query == nil {
+			return Relation{}, true
+		}
+		relation = s.operator(relation, kql.Operator{Kind: "project-away", Body: kql.ExpressionSpec{Expressions: []kql.Expression{name(value), name(restart), name(previous)}}, Span: operator.Span})
+		relation.serialized = true
+		if relation.Query == nil {
+			return Relation{}, true
+		}
+	}
+	flush()
+	return relation, true
+}
+
+func rowWindowSessionCall(expression kql.Expression) (*kql.CallExpression, bool) {
+	if named, ok := expression.(*kql.NamedExpression); ok {
+		expression = named.Value
+	}
+	call, ok := expression.(*kql.CallExpression)
+	if !ok {
+		return nil, true
+	}
+	name, ok := call.Function.(*kql.NameExpression)
+	if !ok || !strings.EqualFold(unquoteKQL(name.Name), "row_window_session") {
+		return nil, true
+	}
+	return call, true
+}

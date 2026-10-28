@@ -317,3 +317,70 @@ func (s *compileState) lookupTable(expression kql.Expression, spec kql.EvaluateS
 	}
 	return lookup, true
 }
+
+// maxRowsNear bounds rows_near's row counts.
+const maxRowsNear = 1 << 20
+
+// rowsNear keeps the rows within NumRows before (or RowsAfter after) a row
+// matching the condition, in the input's serialized order.
+func (s *compileState) rowsNear(input Relation, spec kql.EvaluateSpec, feature string) Relation {
+	fail := func(message string) Relation {
+		s.bindError("KQLB0417", spec.Span, feature, message)
+		return Relation{}
+	}
+	if input.Schema.Unknown {
+		return fail("rows_near requires a known input schema")
+	}
+	if len(spec.Args) < 2 || len(spec.Args) > 3 {
+		return fail("rows_near requires a condition, a row count and an optional count of rows after")
+	}
+	count := func(expression kql.Expression) (int64, bool) {
+		literal, ok := expression.(*kql.LiteralExpression)
+		if !ok || literal.Kind != kql.NumberToken {
+			return 0, false
+		}
+		value, err := strconv.ParseInt(literal.Text, 10, 64)
+		return value, err == nil && value >= 0 && value <= maxRowsNear
+	}
+	before, ok := count(spec.Args[1])
+	if !ok {
+		return fail(fmt.Sprintf("rows_near row counts must be integer constants from 0 to %d", maxRowsNear))
+	}
+	after := before
+	if len(spec.Args) == 3 {
+		if after, ok = count(spec.Args[2]); !ok {
+			return fail(fmt.Sprintf("rows_near row counts must be integer constants from 0 to %d", maxRowsNear))
+		}
+	}
+	previous := s.input
+	s.input = input.Schema
+	condition := s.expression(spec.Args[0])
+	s.input = previous
+	if condition.SQL == nil {
+		return Relation{}
+	}
+	if condition.Type != TypeBool && condition.Type != TypeUnknown {
+		return fail("rows_near condition must be Boolean")
+	}
+	// A row is near a match when a match lies within before rows after it or
+	// after rows before it.
+	matched := &sqlast.Case{Branches: []sqlast.When{{Condition: condition.SQL, Result: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}
+	window := &sqlast.Window{Expr: &sqlast.Call{Name: "max", Args: []sqlast.Expr{matched}}, OrderBy: rowsNearOrder(input), Rows: &sqlast.RowsFrame{Preceding: after, Following: before}}
+	flagged := &sqlast.Select{From: &sqlast.Subquery{Query: input.Query, Alias: s.nextAlias()}, Projections: []sqlast.SelectItem{{Expr: &sqlast.Star{}}, {Expr: window, Alias: "__rows_near"}}}
+	projections := make([]sqlast.SelectItem, len(input.Schema.Columns))
+	for i, column := range input.Schema.Columns {
+		projections[i] = sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name}
+	}
+	where := &sqlast.Binary{Left: &sqlast.Identifier{Parts: []string{"__rows_near"}}, Operator: "=", Right: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}
+	result := Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: flagged, Alias: s.nextAlias()}, Where: where, Projections: projections}, Schema: input.Schema.Clone(), serialized: input.serialized, order: input.order, rowDependencies: input.rowDependencies}
+	return result
+}
+
+// rowsNearOrder orders rows by the input's serialized order, or its current
+// order when it has none.
+func rowsNearOrder(input Relation) []sqlast.Order {
+	if len(input.order) > 0 {
+		return input.order
+	}
+	return []sqlast.Order{{Expr: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "1"}}}
+}

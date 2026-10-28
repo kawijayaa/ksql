@@ -78,6 +78,11 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		s.tabularLets[strings.ToLower(spec.Name)] = input
 		return input
 	}
+	if operator.Kind == "extend" {
+		if relation, handled := s.rowWindowSession(input, operator); handled {
+			return relation
+		}
+	}
 	if spec, ok := operator.Body.(kql.ExpressionSpec); ok && (operator.Kind == "extend" || operator.Kind == "project" || operator.Kind == "where" || operator.Kind == "serialize") && s.hasWindowCall(spec.Expressions) {
 		return s.windowOperator(input, operator, spec.Expressions)
 	}

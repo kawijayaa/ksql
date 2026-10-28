@@ -501,6 +501,11 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		}
 		if e.Cumulative {
 			clauses = append(clauses, "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW")
+		} else if e.Rows != nil {
+			if e.Rows.Preceding < 0 || e.Rows.Following < 0 {
+				return "", fmt.Errorf("window frame bounds must be non-negative")
+			}
+			clauses = append(clauses, fmt.Sprintf("ROWS BETWEEN %d PRECEDING AND %d FOLLOWING", e.Rows.Preceding, e.Rows.Following))
 		}
 		return call + " OVER (" + strings.Join(clauses, " ") + ")", nil
 	case *sqlast.List:
