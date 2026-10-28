@@ -99,6 +99,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		return s.projectByNames(from, input.Schema, operator)
 	case "summarize":
 		spec := operator.Body.(kql.SummarizeSpec)
+		if spec.Aggregates = s.expandPercentiles(spec.Aggregates); spec.Aggregates == nil && len(operator.Body.(kql.SummarizeSpec).Aggregates) > 0 {
+			return Relation{}
+		}
 		if s.hasRowSelection(spec.Aggregates) {
 			return s.summarizeRows(input, spec, operator)
 		}

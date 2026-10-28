@@ -51,6 +51,19 @@ func WithTypedAggregate(name string, rule TypedFunctionRule) Option {
 	}
 }
 
+// WithScalarOverload marks calls of an aggregate with at least minArguments
+// arguments as scalar calls of the same mapping, as Kusto's hll_merge and
+// merge_tdigest are aggregates with one argument and scalar functions with
+// several. The mapping's rule receives both forms.
+func WithScalarOverload(name string, minArguments int) Option {
+	return func(compiler *Compiler) {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && minArguments > 0 {
+			compiler.scalarOverloads[name] = minArguments
+		}
+	}
+}
+
 // WithAggregate registers an aggregate mapping with untyped SQL arguments.
 // Prefer WithTypedAggregate when the runtime requires type validation.
 func WithAggregate(name string, rule FunctionRule) Option {

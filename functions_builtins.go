@@ -98,7 +98,8 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		s.bindError("KQLB0391", value.Span, "function."+function, function+" is a window function; use it in extend, project, serialize or where over a serialized row set")
 		return boundExpr{}
 	}
-	if s.isAggregate(function) {
+	scalarOverload := s.compiler.scalarOverloads[function] > 0 && len(value.Args) >= s.compiler.scalarOverloads[function]
+	if s.isAggregate(function) && !scalarOverload {
 		if !s.aggregationAllowed {
 			s.bindError("KQLB0511", value.Span, "aggregate."+function, function+" requires a summarize aggregation context")
 			return boundExpr{}
