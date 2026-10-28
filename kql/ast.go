@@ -69,6 +69,16 @@ type ControlStatement struct {
 	Span Span
 }
 
+// SetStatement is set Option [= Value], a request option.
+type SetStatement struct {
+	Name  string
+	Value Expression
+	Span  Span
+}
+
+func (*SetStatement) statementNode()   {}
+func (s *SetStatement) NodeSpan() Span { return s.Span }
+
 // QueryParametersStatement declares request-supplied scalar values.
 type QueryParametersStatement struct {
 	Parameters []FunctionParameter

@@ -233,6 +233,12 @@ func firstArgumentResultName(function string) bool {
 // propagated first arguments) wins, a column reference keeps its name, and a
 // call follows its function's ResultNameKind. Calls without a rule have no
 // name, so projection binding generates ColumnN.
+// manualResultNameRules covers names Kusto.Language computes outside the
+// generated ResultNameKind table, as Microsoft's examples show.
+var manualResultNameRules = map[string]resultNameRule{
+	"bin_auto": {resultFirstArgument, ""},
+}
+
 func inferredName(expression kql.Expression, boundName string) string {
 	if boundName != "" {
 		return boundName
@@ -247,6 +253,9 @@ func inferredName(expression kql.Expression, boundName string) string {
 		}
 		name := strings.ToLower(lastName(function.Name))
 		rule, ok := resultNameRules[name]
+		if !ok {
+			rule, ok = manualResultNameRules[name]
+		}
 		if !ok {
 			return ""
 		}

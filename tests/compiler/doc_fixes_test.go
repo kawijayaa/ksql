@@ -59,3 +59,38 @@ func TestSQLiteExecMvApplyPerRow(t *testing.T) {
 		t.Fatalf("unsupported mv-apply subquery: %v", result.Diagnostics)
 	}
 }
+
+// set statements: query_take_max_records limits results, query_now fixes
+// now(), the bin_auto options define bin_auto, and others only warn.
+func TestSetStatements(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`set query_take_max_records=2; range x from 1 to 5 step 1 | order by x asc`, `[[1] [2]]`},
+		{`set truncationmaxrecords = 1; range x from 1 to 5 step 1`, `[[1]]`},
+		{`set notruncation; print x=1`, `[[1]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	warned := compiler.Compile(`set notruncation; print x=1`)
+	if len(warned.Diagnostics) != 1 || warned.Diagnostics[0].Code != "KQLL0104" || warned.Diagnostics[0].Severity != ksql.SeverityWarning {
+		t.Fatalf("set notruncation diagnostics: %v", warned.Diagnostics)
+	}
+	for _, tc := range []struct{ query, code string }{
+		{`print bin_auto(1)`, "KQLB0105"},
+		{`set query_take_max_records="a"; print 1`, "KQLB0105"},
+		{`set = 1; print 1`, "KQLP0103"},
+	} {
+		result := compiler.Compile(tc.query)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {
+			t.Fatalf("%s: diagnostics %v want %s", tc.query, result.Diagnostics, tc.code)
+		}
+	}
+}

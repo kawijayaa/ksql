@@ -96,6 +96,8 @@ func (c *Compiler) Compile(source string) Result {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
 			state.bindLet(node, nil)
+		case *kql.SetStatement:
+			state.setOption(node)
 		case *kql.ControlStatement:
 			state.error("KQLL0102", node.Span, "statement."+node.Kind, node.Kind+" is a KQL session/control statement with no SQL query equivalent")
 		case *kql.QueryParametersStatement:
@@ -113,6 +115,7 @@ func (c *Compiler) Compile(source string) Result {
 			}
 		}
 	}
+	relation = state.limitResults(relation)
 	relation.Query = state.materializeQueries(relation.Query)
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features

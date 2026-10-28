@@ -79,12 +79,34 @@ func parseStatement(tokens []Token) (Statement, []ParseError) {
 			return parseQueryParameters(tokens)
 		}
 		return &ControlStatement{Kind: first, Raw: tokens, Span: span}, nil
-	case "alias", "restrict", "set":
+	case "set":
+		return parseSet(tokens)
+	case "alias", "restrict":
 		return &ControlStatement{Kind: first, Raw: tokens, Span: span}, nil
 	default:
 		pipeline, errs := parsePipeline(tokens)
 		return &ExpressionStatement{Pipeline: pipeline, Span: span}, errs
 	}
+}
+
+// parseSet parses set Option [= Value]; an option without a value is true.
+func parseSet(tokens []Token) (Statement, []ParseError) {
+	statement := &SetStatement{Span: tokensSpan(tokens)}
+	if len(tokens) < 2 || tokens[1].Kind != IdentifierToken {
+		return statement, []ParseError{{Code: "KQLP0103", Message: "set requires an option name", Span: statement.Span}}
+	}
+	statement.Name = tokens[1].Text
+	switch {
+	case len(tokens) == 2:
+		statement.Value = &LiteralExpression{Text: "true", Kind: IdentifierToken, Span: tokens[1].Span}
+	case tokens[2].Text == "=" && len(tokens) > 3:
+		value, errs := parseExpressionTokens(tokens[3:])
+		statement.Value = value
+		return statement, errs
+	default:
+		return statement, []ParseError{{Code: "KQLP0103", Message: "set requires Option = Value", Span: statement.Span}}
+	}
+	return statement, nil
 }
 
 func parseLet(tokens []Token) (Statement, []ParseError) {

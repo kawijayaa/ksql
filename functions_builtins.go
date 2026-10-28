@@ -25,6 +25,14 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
+	if function == "now" {
+		if bound, ok := s.requestNow(value); ok {
+			return bound
+		}
+	}
+	if function == "bin_auto" {
+		return s.binAuto(value)
+	}
 	if function == "column_names_of" {
 		return s.columnNamesOf(value)
 	}
