@@ -21,6 +21,9 @@ func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
 	if strings.EqualFold(text, "null") {
 		return &sqlast.Literal{Kind: sqlast.NullLiteral}
 	}
+	if value, ok := hexLiteral(text); ok {
+		return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(value, 10)}
+	}
 	if isTimespan(text) {
 		if ticks, ok := timespanTicks(text); ok {
 			return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(ticks, 10)}
@@ -40,6 +43,19 @@ func unquoteKQL(value string) string {
 func stringLiteralValue(value *kql.LiteralExpression) string {
 	decoded, _ := kql.StringValue(value)
 	return decoded
+}
+
+// hexLiteral reads a 0x-prefixed long literal; values above MaxInt64 wrap
+// to negative longs, as 64-bit two's complement.
+func hexLiteral(text string) (int64, bool) {
+	if len(text) < 3 || text[0] != '0' || (text[1] != 'x' && text[1] != 'X') {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(text[2:], 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	return int64(parsed), true
 }
 
 func isTimespan(value string) bool {
@@ -136,6 +152,9 @@ func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 	}
 	if strings.EqualFold(text, "null") {
 		return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: TypeUnknown}
+	}
+	if parsed, ok := hexLiteral(text); ok {
+		return boundExpr{SQL: s.bind(parsed), Type: TypeLong}
 	}
 	if isTimespan(text) {
 		return s.timespanLiteral(text, value.Span)

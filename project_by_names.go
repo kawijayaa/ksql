@@ -139,17 +139,23 @@ func (s *compileState) projectByNames(from *sqlast.Subquery, input Schema, opera
 // columnNamesOf returns the column names of a tabular expression as a
 // dynamic array, resolved at compile time.
 func (s *compileState) columnNamesOf(call *kql.CallExpression) boundExpr {
-	var name *kql.NameExpression
-	ok := len(call.Args) == 1
-	if ok {
-		name, ok = call.Args[0].(*kql.NameExpression)
-	}
-	if !ok {
-		s.bindError("KQLB0413", call.Span, "function.column_names_of", "column_names_of requires one table name")
+	if len(call.Args) != 1 {
+		s.bindError("KQLB0413", call.Span, "function.column_names_of", "column_names_of requires one table name or tabular function call")
 		return boundExpr{}
 	}
 	saved := len(s.args)
-	relation := s.source(kql.Source{Kind: "table", Name: name.Name, Span: name.Span})
+	var relation Relation
+	switch arg := call.Args[0].(type) {
+	case *kql.NameExpression:
+		relation = s.source(kql.Source{Kind: "table", Name: arg.Name, Span: arg.Span})
+	case *kql.CallExpression:
+		var ok bool
+		if relation, ok = s.tabularLetValue(arg); !ok {
+			s.bindError("KQLB0413", call.Span, "function.column_names_of", "column_names_of requires a tabular function call")
+		}
+	default:
+		s.bindError("KQLB0413", call.Span, "function.column_names_of", "column_names_of requires one table name or tabular function call")
+	}
 	s.args = s.args[:saved]
 	if relation.Query == nil || relation.Schema.Unknown {
 		if relation.Query != nil {

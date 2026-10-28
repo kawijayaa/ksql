@@ -108,7 +108,9 @@ func functionArgument(value boundExpr, expected ScalarType) (boundExpr, bool) {
 		value.Type = expected
 		return value, true
 	}
-	if expected == TypeLong && value.Type == TypeInt {
+	// Kusto converts between int and long arguments; a literal such as 1 is
+	// a long but is accepted by an int parameter.
+	if (expected == TypeLong && value.Type == TypeInt) || (expected == TypeInt && value.Type == TypeLong) {
 		value.Type = expected
 		return value, true
 	}

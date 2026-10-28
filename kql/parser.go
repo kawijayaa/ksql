@@ -557,11 +557,20 @@ func parseAs(op Operator, tokens []Token) (Operator, []ParseError) {
 		spec.Materialized = &materialized
 		position = 5
 	}
-	if position >= len(tokens) || tokens[position].Kind != IdentifierToken || position != len(tokens)-1 {
+	// The alias is an identifier or a bracket-quoted name, as in
+	// as ['Count of events'].
+	name, ok := "", position < len(tokens)
+	if ok {
+		name, ok = declarationName(tokens[position:])
+	}
+	if !ok {
 		op.Body = spec
 		return op, []ParseError{{Code: "KQLP0338", Message: "as requires one alias name", Span: op.Span}}
 	}
-	spec.Name = tokens[position].Text
+	if tokens[position].Text == "[" {
+		name, _ = DecodeString(name)
+	}
+	spec.Name = name
 	op.Body = spec
 	return op, nil
 }

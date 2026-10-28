@@ -3,6 +3,7 @@ package compiler_test
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kawijayaa/ksql"
@@ -49,7 +50,12 @@ func TestDynamicJSONLiterals(t *testing.T) {
 		if !result.OK() || len(result.Columns) != 1 || result.Columns[0].Type != ksql.TypeDynamic {
 			t.Fatal(result)
 		}
-		for _, query := range []string{`print x=dynamic([1 2])`, `print x=dynamic([1,])`, `print x=dynamic()`, `print x=dynamic(foo)`, `print x=dynamic([datetime("2024-01-01")])`, `print x=dynamic([1)`, `print x=dynamic({"x":})`} {
+		// Typed constants inside dynamic literals become their JSON forms.
+		typed := compiler.Compile(`print x=dynamic({"d": datetime(2024-01-02 03:04), "t": timespan(1.02:00:00), "g": guid(ABC-1), "n": long(7), "nested": dynamic([1, "a"]), "h": 0xFF})`)
+		if want := `{"d":"2024-01-02T03:04:00.0000000Z","t":"1.02:00:00","g":"abc-1","n":7,"nested":[1,"a"],"h":255}`; !typed.OK() || !strings.Contains(typed.SQL+fmt.Sprint(typed.Args), want) {
+			t.Fatalf("typed dynamic constants: %#v", typed)
+		}
+		for _, query := range []string{`print x=dynamic([1 2])`, `print x=dynamic([1,])`, `print x=dynamic()`, `print x=dynamic(foo)`, `print x=dynamic([datetime("not a date")])`, `print x=dynamic([int(x)])`, `print x=dynamic([1)`, `print x=dynamic({"x":})`} {
 			result := compiler.Compile(query)
 			if result.OK() || result.SQL != "" {
 				t.Fatalf("accepted invalid constant %s: %#v", query, result)

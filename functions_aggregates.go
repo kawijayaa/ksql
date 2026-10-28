@@ -71,6 +71,10 @@ func (s *compileState) coreAggregate(call *kql.CallExpression, name string, args
 	}
 	if name == "count" || name == "countif" {
 		arg := sqlast.Expr(&sqlast.Star{})
+		if len(args) == 1 && name == "count" && types[0] != TypeBool && types[0] != TypeUnknown {
+			// count(x) of a non-Boolean value counts its non-null values.
+			return boundExpr{SQL: &sqlast.Call{Name: "count", Args: []sqlast.Expr{args[0]}}, Type: TypeLong}
+		}
 		if len(args) == 1 {
 			if !s.booleanArgument(call, name, types[0]) {
 				return boundExpr{}

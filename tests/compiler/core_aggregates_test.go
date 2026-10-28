@@ -96,7 +96,7 @@ func TestCoreAggregateDiagnosticsAndOverrides(t *testing.T) {
 		`datatable(n:long)[1]|summarize sum(toscalar(print sum(1)))`,
 		`datatable(n:long)[1]|summarize take_any(sum(n))`,
 		`let f=(){sum(1)};print 1`,
-		`print 1|summarize count(1)`, `print 1|summarize count(*)`, `print 1|summarize count(true,false)`,
+		`print 1|summarize count(*)`, `print 1|summarize count(true,false)`,
 		`print 1|summarize sum()`, `print 1|summarize avg(1,2)`, `print 1|summarize minif(1)`, `print 1|summarize maxif(1,true,false)`,
 		`print 1|summarize sum("1")`, `print 1|summarize avg(true)`, `print 1|summarize min(dynamic([]))`,
 		`print 1|summarize sumif(1,1)`, `print 1|summarize avgif(1,"true")`, `print 1|summarize countif(1)`,

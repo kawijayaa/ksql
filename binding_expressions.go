@@ -51,15 +51,20 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 	case *kql.LiteralExpression:
 		return s.literal(value)
 	case *kql.DynamicExpression:
+		tokens, err := rewriteDynamicConstants(value.Tokens)
+		if err != nil {
+			s.bindError("KQLB0407", value.Span, "expression.dynamic", "dynamic literal constant: "+err.Error())
+			return boundExpr{}
+		}
 		var text strings.Builder
-		for i := 0; i < len(value.Tokens); i++ {
-			token := value.Tokens[i]
+		for i := 0; i < len(tokens); i++ {
+			token := tokens[i]
 			if token.Kind == kql.StringToken {
 				var decoded strings.Builder
 				decoded.WriteString(unquoteKQL(token.Text))
-				for i+1 < len(value.Tokens) && value.Tokens[i+1].Kind == kql.StringToken {
+				for i+1 < len(tokens) && tokens[i+1].Kind == kql.StringToken {
 					i++
-					decoded.WriteString(unquoteKQL(value.Tokens[i].Text))
+					decoded.WriteString(unquoteKQL(tokens[i].Text))
 				}
 				encoded, _ := json.Marshal(decoded.String())
 				text.Write(encoded)
@@ -68,7 +73,7 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 			}
 			// JSON signs must directly precede their number. Keep other token
 			// boundaries so malformed adjacent scalars cannot become a valid value.
-			sign := token.Text == "-" && i+1 < len(value.Tokens) && value.Tokens[i+1].Kind == kql.NumberToken
+			sign := token.Text == "-" && i+1 < len(tokens) && tokens[i+1].Kind == kql.NumberToken
 			if !sign {
 				text.WriteByte(' ')
 			}
