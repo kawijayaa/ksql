@@ -37,6 +37,11 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	if operator.Kind == "parse" || operator.Kind == "parse-where" {
 		return s.parseOperator(input, operator)
 	}
+	if operator.Kind == "make-series" {
+		if _, ok := operator.Body.(kql.MakeSeriesSpec); ok {
+			return s.makeSeries(input, operator)
+		}
+	}
 	if operator.Kind == "evaluate" {
 		if _, ok := operator.Body.(kql.EvaluateSpec); ok {
 			return s.evaluate(input, operator)

@@ -25,6 +25,16 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
+	if function == "string" || function == "guid" {
+		// string(null) and guid(null) are typed null literals.
+		if len(value.Args) == 1 {
+			if literal, ok := value.Args[0].(*kql.LiteralExpression); ok && literal.Kind != kql.StringToken && strings.EqualFold(literal.Text, "null") {
+				return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: TypeString}
+			}
+		}
+		s.bindError("KQLB0413", value.Span, "function."+function, function+"() takes null; use tostring() to convert values")
+		return boundExpr{}
+	}
 	if function == "typeof" {
 		// typeof(T) is a type literal, kept as an unbound string so
 		// application rules such as extract can read the requested type.

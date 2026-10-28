@@ -600,6 +600,29 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.ScalarSubquery:
+		query, err := r.query(e.Query)
+		if err != nil {
+			return "", err
+		}
+		return "(" + query + ")", nil
+	case *sqlast.OrderedAggregate:
+		args, err := r.expressions(e.Args)
+		if err != nil {
+			return "", err
+		}
+		orders := make([]string, 0, len(e.OrderBy))
+		for _, order := range e.OrderBy {
+			expression, err := r.expr(order.Expr)
+			if err != nil {
+				return "", err
+			}
+			if direction := strings.ToUpper(order.Direction); direction == "ASC" || direction == "DESC" {
+				expression += " " + direction
+			}
+			orders = append(orders, expression)
+		}
+		return e.Name + "(" + strings.Join(args, ", ") + " ORDER BY " + strings.Join(orders, ", ") + ")", nil
 	case *sqlast.ExpansionArray:
 		value, err := r.expr(e.Value)
 		if err != nil {

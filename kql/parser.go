@@ -386,6 +386,8 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		return parseRender(op, body)
 	case "evaluate":
 		return parseEvaluate(op, body)
+	case "make-series":
+		return parseMakeSeries(op, body)
 	case "sample-distinct":
 		return parseSampleDistinct(op, body)
 	case "invoke":

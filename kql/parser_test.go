@@ -51,8 +51,9 @@ func TestParseRecognizesAdvancedOperator(t *testing.T) {
 	if op.Kind != "make-series" {
 		t.Fatalf("operator = %q", op.Kind)
 	}
-	if _, ok := op.Body.(RawSpec); !ok {
-		t.Fatalf("body = %T, want RawSpec", op.Body)
+	spec, ok := op.Body.(MakeSeriesSpec)
+	if !ok || len(spec.Items) != 1 || spec.Items[0].Name != "n" || spec.Step == nil || spec.From != nil {
+		t.Fatalf("body = %#v", op.Body)
 	}
 }
 

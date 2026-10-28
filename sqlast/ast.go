@@ -187,6 +187,17 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// ScalarSubquery is a subquery returning one value.
+type ScalarSubquery struct{ Query Query }
+
+// OrderedAggregate is an aggregate whose input rows are ordered, such as
+// json_group_array(x ORDER BY k).
+type OrderedAggregate struct {
+	Name    string
+	Args    []Expr
+	OrderBy []Order
+}
+
 // ExpansionArray normalizes a dynamic value for mv-expand: arrays stay as
 // they are, property bags become an array of single-property bags (or of
 // [key, value] pairs when Pairs is set), and other values become null.
@@ -258,35 +269,37 @@ type Filtered struct {
 	Where Expr
 }
 
-func (*Identifier) exprNode()      {}
-func (*Literal) exprNode()         {}
-func (*Parameter) exprNode()       {}
-func (*Star) exprNode()            {}
-func (*QualifiedStar) exprNode()   {}
-func (*Random) exprNode()          {}
-func (*Unary) exprNode()           {}
-func (*Binary) exprNode()          {}
-func (*Window) exprNode()          {}
-func (*Call) exprNode()            {}
-func (*List) exprNode()            {}
-func (*Case) exprNode()            {}
-func (*Cast) exprNode()            {}
-func (*DynamicValue) exprNode()    {}
-func (*Index) exprNode()           {}
-func (*Regex) exprNode()           {}
-func (*RegexCaptures) exprNode()   {}
-func (*KeyValues) exprNode()       {}
-func (*StringMatch) exprNode()     {}
-func (*DatetimeAdd) exprNode()     {}
-func (*DatetimeDiff) exprNode()    {}
-func (*TimespanText) exprNode()    {}
-func (*ArrayContains) exprNode()   {}
-func (*InSubquery) exprNode()      {}
-func (*ExpansionArray) exprNode()  {}
-func (*Exists) exprNode()          {}
-func (*ScalarReference) exprNode() {}
-func (*RankedValue) exprNode()     {}
-func (*Filtered) exprNode()        {}
+func (*Identifier) exprNode()       {}
+func (*Literal) exprNode()          {}
+func (*Parameter) exprNode()        {}
+func (*Star) exprNode()             {}
+func (*QualifiedStar) exprNode()    {}
+func (*Random) exprNode()           {}
+func (*Unary) exprNode()            {}
+func (*Binary) exprNode()           {}
+func (*Window) exprNode()           {}
+func (*Call) exprNode()             {}
+func (*List) exprNode()             {}
+func (*Case) exprNode()             {}
+func (*Cast) exprNode()             {}
+func (*DynamicValue) exprNode()     {}
+func (*Index) exprNode()            {}
+func (*Regex) exprNode()            {}
+func (*RegexCaptures) exprNode()    {}
+func (*KeyValues) exprNode()        {}
+func (*StringMatch) exprNode()      {}
+func (*DatetimeAdd) exprNode()      {}
+func (*DatetimeDiff) exprNode()     {}
+func (*TimespanText) exprNode()     {}
+func (*ArrayContains) exprNode()    {}
+func (*InSubquery) exprNode()       {}
+func (*ExpansionArray) exprNode()   {}
+func (*ScalarSubquery) exprNode()   {}
+func (*OrderedAggregate) exprNode() {}
+func (*Exists) exprNode()           {}
+func (*ScalarReference) exprNode()  {}
+func (*RankedValue) exprNode()      {}
+func (*Filtered) exprNode()         {}
 
 type LiteralKind uint8
 

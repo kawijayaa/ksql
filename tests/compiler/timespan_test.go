@@ -18,7 +18,7 @@ func init() {
 		if !ok {
 			return time.Time{}, false
 		}
-		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02"} {
 			if parsed, err := time.Parse(layout, text); err == nil {
 				return parsed.UTC(), true
 			}
