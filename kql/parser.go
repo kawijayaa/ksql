@@ -207,6 +207,11 @@ func parseSource(tokens []Token) (Source, []ParseError) {
 	if tokens[0].Text == "." {
 		return parseManagement(source, tokens)
 	}
+	if lower(tokens[0]) == "find" && len(tokens) > 1 {
+		spec, errs := parseFindSpec(tokens[1:], source.Span)
+		source.Kind, source.Find = "find", &spec
+		return source, errs
+	}
 	if lower(tokens[0]) == "search" {
 		spec, errs := parseSearchSpec(tokens[1:], source.Span)
 		source.Kind, source.Search = "search", &spec

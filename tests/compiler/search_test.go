@@ -66,3 +66,44 @@ func TestSQLiteExecSearchForms(t *testing.T) {
 		}
 	}
 }
+
+// find with explicit projections (no host bag functions needed).
+func TestSQLiteExecFind(t *testing.T) {
+	db := openInvestigationDB(t)
+	listing := ksql.New(dialect.SQLite(dialect.WithRegexFunction("kql_regex"), dialect.WithRegexCaseInsensitiveFlag("(?i)")),
+		ksql.WithCatalog(listedCatalog{investigationCatalog()}))
+	for _, tc := range []struct{ query, columns, want string }{
+		{`find User == "alice" project User, Host`, `source_ User Host`, `[[Sysmon alice sensor-a] [UAL alice client-a]]`},
+		{`find withsource=T in (UAL, Sysmon) where Message == "matched" or User == "bob" project Message, User`, `T Message User`, `[[Sysmon matched alice] [UAL <nil> bob]]`},
+		{`find in (U*) where "client" project Host:string`, `source_ Host`, `[[UAL client-a] [UAL client-b]]`},
+		{`find in (Sysmon, UAL) where * has "sensor" project User`, `source_ User`, `[[Sysmon alice]]`},
+	} {
+		result := listing.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		names := []string{}
+		for _, column := range result.Columns {
+			names = append(names, column.Name)
+		}
+		if got := fmt.Sprint(names); got != "["+tc.columns+"]" {
+			t.Fatalf("%s: columns %s want %s", tc.query, got, tc.columns)
+		}
+		rows := queryRows(t, db, result)
+		sort.Slice(rows, func(i, j int) bool { return fmt.Sprint(rows[i]) < fmt.Sprint(rows[j]) })
+		if got := fmt.Sprint(rows); got != tc.want {
+			t.Fatalf("%s:\n got=%s\nwant=%s\nSQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	for _, tc := range []struct{ query, code string }{
+		{`find in (UAL) Host == "x"`, "KQLP0357"},
+		{`find Nope == 1 project User`, "KQLB0357"},
+		{`find User == "x" project User:widget`, "KQLB0357"},
+		{`find User == "x"`, "KQLL0503"},
+	} {
+		result := listing.Compile(tc.query)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != tc.code {
+			t.Fatalf("%s: diagnostics %v want %s", tc.query, result.Diagnostics, tc.code)
+		}
+	}
+}

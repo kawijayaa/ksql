@@ -59,6 +59,8 @@ func (s *compileState) source(source kql.Source) Relation {
 		return s.union(Relation{}, kql.Operator{Kind: "union", Body: *source.Union, Span: source.Span})
 	case "search":
 		return s.searchSource(source)
+	case "find":
+		return s.findSource(source)
 	case "print":
 		items, schema := s.projectItems(source.Items, true, Schema{}, true)
 		return Relation{Query: &sqlast.Select{Projections: items}, Schema: schema}

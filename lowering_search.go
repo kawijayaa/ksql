@@ -221,45 +221,8 @@ func (s *compileState) searchTerm(column *kql.NameExpression, term string, input
 // tables (or of every table the catalog lists) with a $table column.
 func (s *compileState) searchSource(source kql.Source) Relation {
 	spec := *source.Search
-	lister, _ := s.compiler.catalog.(TableLister)
-	var all []string
-	if lister != nil {
-		all = lister.TableNames()
-		sort.Strings(all)
-	}
-	var names []string
-	seen := map[string]bool{}
-	add := func(name string) {
-		if key := strings.ToLower(name); !seen[key] {
-			seen[key] = true
-			names = append(names, name)
-		}
-	}
-	patterns := spec.Tables
-	if !spec.HasTables {
-		patterns = []string{"*"}
-	}
-	for _, pattern := range patterns {
-		if !strings.Contains(pattern, "*") {
-			add(unquoteKQL(pattern))
-			continue
-		}
-		if lister == nil {
-			s.bindError("KQLB0356", source.Span, "source.search", "searching table patterns or every table requires a catalog that lists its tables")
-			return Relation{}
-		}
-		for _, name := range all {
-			if matchColumnPattern(name, pattern) {
-				add(name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		s.bindError("KQLB0356", source.Span, "source.search", "search matched no tables")
-		return Relation{}
-	}
-	if len(names) > maxSearchTables {
-		s.bindError("KQLB0356", source.Span, "source.search", fmt.Sprintf("search spans more than %d tables", maxSearchTables))
+	names, ok := s.resolveTablePatterns(spec.Tables, spec.HasTables, source.Span, "source.search")
+	if !ok {
 		return Relation{}
 	}
 	union := kql.UnionSpec{Kind: "outer", WithSource: "$table"}
@@ -283,4 +246,50 @@ func (s *compileState) searchSource(source kql.Source) Relation {
 	}
 	from := &sqlast.Subquery{Query: relation.Query, Alias: s.nextAlias()}
 	return Relation{Query: &sqlast.Select{From: from, Where: predicate}, Schema: relation.Schema.Clone()}
+}
+
+// resolveTablePatterns expands table names and * patterns (or every table
+// when none are given) through the catalog's TableLister.
+func (s *compileState) resolveTablePatterns(patterns []string, explicit bool, span kql.Span, feature string) ([]string, bool) {
+	lister, _ := s.compiler.catalog.(TableLister)
+	var all []string
+	if lister != nil {
+		all = lister.TableNames()
+		sort.Strings(all)
+	}
+	var names []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if key := strings.ToLower(name); !seen[key] {
+			seen[key] = true
+			names = append(names, name)
+		}
+	}
+	if !explicit {
+		patterns = []string{"*"}
+	}
+	for _, pattern := range patterns {
+		if !strings.Contains(pattern, "*") {
+			add(unquoteKQL(pattern))
+			continue
+		}
+		if lister == nil {
+			s.bindError("KQLB0356", span, feature, "searching table patterns or every table requires a catalog that lists its tables")
+			return nil, false
+		}
+		for _, name := range all {
+			if matchColumnPattern(name, pattern) {
+				add(name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		s.bindError("KQLB0356", span, feature, "no tables matched")
+		return nil, false
+	}
+	if len(names) > maxSearchTables {
+		s.bindError("KQLB0356", span, feature, fmt.Sprintf("more than %d tables matched", maxSearchTables))
+		return nil, false
+	}
+	return names, true
 }

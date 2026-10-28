@@ -94,6 +94,7 @@ type Source struct {
 	Command *ManagementCommand
 	Union   *UnionSpec
 	Search  *SearchSpec
+	Find    *FindSpec
 	Kind    string
 	Name    string
 	Expr    Expression
@@ -187,6 +188,25 @@ type SampleDistinctSpec struct {
 }
 
 // SearchSpec contains the scalar term searched across the visible schema.
+// FindSpec is find [withsource=Column] [in (Tables)] where Predicate
+// [project-smart | project Column[:Type], ... [, pack_all()]].
+type FindSpec struct {
+	WithSource string
+	Tables     []string
+	HasTables  bool
+	Term       Expression
+	Project    []FindColumn
+	HasProject bool
+	PackAll    bool
+}
+
+// FindColumn is one find project column, with an optional result type.
+type FindColumn struct {
+	Name string
+	Type string
+	Span Span
+}
+
 // SearchSpec is search [kind=CaseSensitivity] [in (Tables)] Predicate.
 // Kind is "" or "case_sensitive"; Tables holds table names and * patterns
 // when HasTables is set (only for a search that starts a query).
