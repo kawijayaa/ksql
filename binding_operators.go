@@ -35,6 +35,11 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 			s.bindError("KQLB0408", value.Span, scalarOperatorID(op), "arithmetic operators do not accept string or Boolean operands")
 			return boundExpr{}
 		}
+		if left.SQL != nil && right.SQL != nil {
+			if result, handled := s.temporalArithmetic(op, left, right, value.Span); handled {
+				return result
+			}
+		}
 	}
 	boolean := func(expression sqlast.Expr) boundExpr { return boundExpr{SQL: expression, Type: TypeBool} }
 	if isNullExpression(right.SQL) && (op == "==" || op == "!=" || op == "<>") {

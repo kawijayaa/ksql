@@ -25,7 +25,16 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}
-	if function == "datetime" || function == "date" || function == "timespan" || function == "time" {
+	if function == "timespan" || function == "time" {
+		if len(value.Args) != 1 {
+			return s.arity(value, function, 1)
+		}
+		if literal, ok := value.Args[0].(*kql.LiteralExpression); ok && literal.Kind != kql.StringToken && strings.EqualFold(literal.Text, "null") {
+			return s.timespanLiteral("null", value.Span)
+		}
+		return s.timespanLiteral(expressionText(value.Args[0]), value.Span)
+	}
+	if function == "datetime" || function == "date" {
 		if len(value.Args) != 1 {
 			return s.arity(value, function, 1)
 		}
@@ -260,6 +269,9 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	case "tostring":
 		if len(args) != 1 {
 			return s.arity(value, function, 1)
+		}
+		if argTypes[0] == TypeTimespan {
+			return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.TimespanText{Value: args[0]}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}, Type: TypeString}
 		}
 		// KQL strings have no null: tostring of a null value is empty.
 		return boundExpr{SQL: &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{&sqlast.Cast{Expr: args[0], Type: "VARCHAR"}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}, Type: TypeString}

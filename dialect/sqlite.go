@@ -6,6 +6,8 @@ type sqlite struct {
 	regexFunction            string
 	regexCapturesFunction    string
 	keyValuesFunction        string
+	datetimeAddFunction      string
+	datetimeDiffFunction     string
 	regexCaseInsensitiveFlag string
 }
 
@@ -41,6 +43,17 @@ func WithKeyValuesFunction(name string) SQLiteOption {
 	return func(d *sqlite) {
 		if validFunctionName(name) {
 			d.keyValuesFunction = name
+		}
+	}
+}
+
+// WithDatetimeArithmeticFunctions configures UDFs for datetime + ticks
+// (datetime, ticks) and datetime - datetime in ticks (left, right), matching
+// the application's datetime storage. Invalid identifiers are ignored.
+func WithDatetimeArithmeticFunctions(add, diff string) SQLiteOption {
+	return func(d *sqlite) {
+		if validFunctionName(add) && validFunctionName(diff) {
+			d.datetimeAddFunction, d.datetimeDiffFunction = add, diff
 		}
 	}
 }
@@ -104,6 +117,28 @@ func (sqlite) StringMatch(value, pattern, mode string) (string, bool) {
 			"FROM (SELECT " + value + " AS v, " + pattern + " AS p) AS ksql_match)", true
 	}
 	return "(instr(" + value + ", " + pattern + ") > 0)", true
+}
+func (d sqlite) DatetimeAdd(datetime, ticks string) (string, bool) {
+	if d.datetimeAddFunction == "" {
+		return "", false
+	}
+	return d.datetimeAddFunction + "(" + datetime + ", " + ticks + ")", true
+}
+func (d sqlite) DatetimeDiff(left, right string) (string, bool) {
+	if d.datetimeDiffFunction == "" {
+		return "", false
+	}
+	return d.datetimeDiffFunction + "(" + left + ", " + right + ")", true
+}
+
+// TimespanText formats ticks with printf, binding the value once.
+func (sqlite) TimespanText(value string) (string, bool) {
+	return "(SELECT CASE WHEN ksql_span.t IS NULL THEN NULL ELSE " +
+		"(CASE WHEN ksql_span.t < 0 THEN '-' ELSE '' END) || " +
+		"(CASE WHEN abs(ksql_span.t) >= 864000000000 THEN (abs(ksql_span.t) / 864000000000) || '.' ELSE '' END) || " +
+		"printf('%02d:%02d:%02d', (abs(ksql_span.t) / 36000000000) % 24, (abs(ksql_span.t) / 600000000) % 60, (abs(ksql_span.t) / 10000000) % 60) || " +
+		"(CASE WHEN abs(ksql_span.t) % 10000000 <> 0 THEN printf('.%07d', abs(ksql_span.t) % 10000000) ELSE '' END) END " +
+		"FROM (SELECT " + value + " AS t) AS ksql_span)", true
 }
 func (d sqlite) KeyValues(value, options string) (string, bool) {
 	if d.keyValuesFunction == "" {

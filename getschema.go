@@ -17,7 +17,7 @@ func (s *compileState) getSchema(input Schema, operator kql.Operator) Relation {
 	}
 	schema := Schema{Columns: []Column{{Name: "ColumnName", Type: TypeString}, {Name: "ColumnOrdinal", Type: TypeLong}, {Name: "DataType", Type: TypeString}, {Name: "ColumnType", Type: TypeString}}}
 	values := &sqlast.Values{Columns: []string{"ColumnName", "ColumnOrdinal", "DataType", "ColumnType"}, Alias: s.nextAlias()}
-	types := map[ScalarType]string{TypeBool: "System.Boolean", TypeInt: "System.Int32", TypeLong: "System.Int64", TypeReal: "System.Double", TypeString: "System.String", TypeDateTime: "System.DateTime", TypeDynamic: "System.Object"}
+	types := map[ScalarType]string{TypeBool: "System.Boolean", TypeInt: "System.Int32", TypeLong: "System.Int64", TypeReal: "System.Double", TypeString: "System.String", TypeDateTime: "System.DateTime", TypeTimespan: "System.TimeSpan", TypeDynamic: "System.Object"}
 	for i, column := range input.Columns {
 		dataType, ok := types[column.Type]
 		if !ok {

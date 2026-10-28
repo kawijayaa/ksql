@@ -22,6 +22,9 @@ func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
 		return &sqlast.Literal{Kind: sqlast.NullLiteral}
 	}
 	if isTimespan(text) {
+		if ticks, ok := timespanTicks(text); ok {
+			return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(ticks, 10)}
+		}
 		return &sqlast.Literal{Kind: sqlast.IntervalLiteral, Value: text}
 	}
 	return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: text}
@@ -135,10 +138,7 @@ func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 		return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NullLiteral}, Type: TypeUnknown}
 	}
 	if isTimespan(text) {
-		if s.compiler.parameterization == BoundParameters {
-			return boundExpr{SQL: s.bind(text), Type: TypeUnknown}
-		}
-		return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.IntervalLiteral, Value: text}, Type: TypeUnknown}
+		return s.timespanLiteral(text, value.Span)
 	}
 	if strings.ContainsAny(text, ".eE") {
 		parsed, err := strconv.ParseFloat(text, 64)
@@ -168,6 +168,8 @@ func parseScalarType(value string) ScalarType {
 		return TypeString
 	case "datetime", "date":
 		return TypeDateTime
+	case "timespan", "time":
+		return TypeTimespan
 	case "dynamic":
 		return TypeDynamic
 	default:

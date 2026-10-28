@@ -63,6 +63,12 @@ func NormalizeParameters(query Query, arguments []any) []any {
 			value.Value = expression(value.Value)
 		case *RegexCaptures:
 			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
+		case *DatetimeAdd:
+			value.Datetime, value.Ticks = expression(value.Datetime), expression(value.Ticks)
+		case *DatetimeDiff:
+			value.Left, value.Right = expression(value.Left), expression(value.Right)
+		case *TimespanText:
+			value.Value = expression(value.Value)
 		case *StringMatch:
 			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
 		case *KeyValues:

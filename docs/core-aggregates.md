@@ -75,11 +75,11 @@ typed Boolean output and positioned diagnostics before SQL preparation. The
 PostgreSQL renderer uses bool_and/bool_or for Boolean minima/maxima, with
 render/parameter checks only; PostgreSQL runtime conformance is unverified.
 
-Timespan/decimal/GUID identity, complete temporal overloads, string collation,
+Timespans are typed ticks: `sum`, `min`, `max` and `avg` (truncated to whole
+ticks) return timespans; see [timespans](timespans.md). Decimal/GUID identity,
+datetime `avg`, string collation,
 nonfinite/overflow behavior, unknown-schema runtime types, full implicit naming,
-all aggregate families and Kusto differential verification remain open. The
-current unknown type representation for timespan and decimal/real conflation
-do not establish correct overload behavior. Feature-ledger labels describe
+all aggregate families and Kusto differential verification remain open. Decimal/real conflation does not establish correct overload behavior. Feature-ledger labels describe
 the tested mapping, not full specification conformance.
 
 Sources:

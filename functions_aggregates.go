@@ -85,7 +85,7 @@ func (s *compileState) coreAggregate(call *kql.CallExpression, name string, args
 	typ := types[0]
 	if base == "sum" || base == "avg" {
 		switch typ {
-		case TypeInt, TypeLong, TypeReal, TypeUnknown:
+		case TypeInt, TypeLong, TypeReal, TypeUnknown, TypeTimespan:
 		case TypeDateTime:
 			s.error("KQLL0512", call.Span, "aggregate."+name, name+" datetime overload requires a compatible temporal runtime")
 			return boundExpr{}
@@ -118,6 +118,13 @@ func (s *compileState) coreAggregate(call *kql.CallExpression, name string, args
 			zero = &sqlast.Cast{Expr: zero, Type: "DOUBLE PRECISION"}
 		}
 		result = &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{result, zero}}
+	}
+	if typ == TypeTimespan {
+		if base == "avg" {
+			// The average of timespans is a timespan in whole ticks.
+			result = &sqlast.Cast{Expr: result, Type: "BIGINT"}
+		}
+		return boundExpr{SQL: result, Type: TypeTimespan}
 	}
 	return boundExpr{SQL: result, Type: functionType(name, types)}
 }

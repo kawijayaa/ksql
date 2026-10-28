@@ -94,7 +94,7 @@ func (s *compileState) expression(expression kql.Expression) (result boundExpr) 
 		if operand.SQL == nil {
 			return boundExpr{}
 		}
-		if operand.Type != TypeUnknown && operand.Type != TypeInt && operand.Type != TypeLong && operand.Type != TypeReal {
+		if operand.Type != TypeUnknown && operand.Type != TypeInt && operand.Type != TypeLong && operand.Type != TypeReal && operand.Type != TypeTimespan {
 			s.bindError("KQLB0409", value.Span, "operator.scalar.unary", "unary arithmetic requires a numeric value; dynamic and temporal overloads require a compatible runtime")
 			return boundExpr{}
 		}

@@ -274,3 +274,13 @@ func TestSQLiteExecRegexPlaceholderOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteExecBetweenBounds(t *testing.T) {
+	db := openInvestigationDB(t)
+	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
+		result := ksql.New(dialect.SQLite(), ksql.WithParameterization(mode)).Compile(`datatable(x:long)[1, 5, 10, 50] | extend b=x between (1 .. 10), n=x !between (2 .. 10) | project b, n`)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != `[[1 1] [1 0] [1 0] [0 1]]` {
+			t.Fatalf("mode=%d rows = %s; SQL=%s", mode, got, result.SQL)
+		}
+	}
+}

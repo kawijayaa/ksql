@@ -17,6 +17,7 @@ const (
 	TypeReal     ScalarType = "real"
 	TypeString   ScalarType = "string"
 	TypeDateTime ScalarType = "datetime"
+	TypeTimespan ScalarType = "timespan"
 	TypeDynamic  ScalarType = "dynamic"
 )
 

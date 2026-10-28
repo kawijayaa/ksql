@@ -187,6 +187,15 @@ type Regex struct {
 	CaseSensitive bool
 }
 
+// DatetimeAdd adds Ticks (100ns units) to Datetime.
+type DatetimeAdd struct{ Datetime, Ticks Expr }
+
+// DatetimeDiff returns Left - Right in ticks.
+type DatetimeDiff struct{ Left, Right Expr }
+
+// TimespanText formats ticks as [-][d.]hh:mm:ss[.fffffff].
+type TimespanText struct{ Value Expr }
+
 // StringMatch tests whether Value contains, starts with or ends with Pattern
 // literally (Mode "contains", "startswith" or "endswith").
 type StringMatch struct {
@@ -245,6 +254,9 @@ func (*Regex) exprNode()           {}
 func (*RegexCaptures) exprNode()   {}
 func (*KeyValues) exprNode()       {}
 func (*StringMatch) exprNode()     {}
+func (*DatetimeAdd) exprNode()     {}
+func (*DatetimeDiff) exprNode()    {}
+func (*TimespanText) exprNode()    {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
 func (*RankedValue) exprNode()     {}

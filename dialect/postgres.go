@@ -53,6 +53,16 @@ func (postgres) StringMatch(value, pattern, mode string) (string, bool) {
 	return "(strpos(" + value + ", " + pattern + ") > 0)", true
 }
 
+// DatetimeAdd adds ticks (100ns) to a timestamp.
+func (postgres) DatetimeAdd(datetime, ticks string) (string, bool) {
+	return "(" + datetime + " + make_interval(secs => (" + ticks + ")::double precision / 10000000))", true
+}
+
+// DatetimeDiff returns left - right in ticks.
+func (postgres) DatetimeDiff(left, right string) (string, bool) {
+	return "CAST(EXTRACT(EPOCH FROM (" + left + " - " + right + ")) * 10000000 AS BIGINT)", true
+}
+
 // Fence uses OFFSET 0, which PostgreSQL does not pull up into the outer query.
 func (postgres) Fence(sql string, _ bool) string     { return sql + " OFFSET 0" }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }

@@ -410,6 +410,18 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if bounds, ok := e.Right.(*sqlast.Binary); ok && strings.EqualFold(e.Operator, "BETWEEN") && strings.EqualFold(bounds.Operator, "AND") {
+			// BETWEEN takes its bounds unparenthesized: x BETWEEN low AND high.
+			low, err := r.expr(bounds.Left)
+			if err != nil {
+				return "", err
+			}
+			high, err := r.expr(bounds.Right)
+			if err != nil {
+				return "", err
+			}
+			return "(" + left + " BETWEEN " + low + " AND " + high + ")", nil
+		}
 		right, err := r.expr(e.Right)
 		if err != nil {
 			return "", err
@@ -588,6 +600,53 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("dialect %s has no regular expression capture function", r.dialect.Name())
+	case *sqlast.DatetimeAdd:
+		datetime, err := r.expr(e.Datetime)
+		if err != nil {
+			return "", err
+		}
+		ticks, err := r.expr(e.Ticks)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			DatetimeAdd(datetime, ticks string) (string, bool)
+		}); ok {
+			if result, supported := capability.DatetimeAdd(datetime, ticks); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no datetime arithmetic", r.dialect.Name())
+	case *sqlast.DatetimeDiff:
+		left, err := r.expr(e.Left)
+		if err != nil {
+			return "", err
+		}
+		right, err := r.expr(e.Right)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			DatetimeDiff(left, right string) (string, bool)
+		}); ok {
+			if result, supported := capability.DatetimeDiff(left, right); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no datetime arithmetic", r.dialect.Name())
+	case *sqlast.TimespanText:
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(interface {
+			TimespanText(value string) (string, bool)
+		}); ok {
+			if result, supported := capability.TimespanText(value); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s cannot format timespans", r.dialect.Name())
 	case *sqlast.StringMatch:
 		value, err := r.expr(e.Value)
 		if err != nil {
