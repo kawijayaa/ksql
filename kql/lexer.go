@@ -72,7 +72,9 @@ func (l *lexer) scanToken() {
 		l.scanIdentifier(start, line, column)
 		return
 	}
-	if unicode.IsDigit(r) || (r == '.' && l.peekDigit(1)) {
+	// Only ASCII digits start numbers; other Unicode digits are invalid here
+	// (scanNumber consumes ASCII digits, so it would never advance).
+	if (r >= '0' && r <= '9') || (r == '.' && l.peekDigit(1)) {
 		l.scanNumber(start, line, column)
 		return
 	}
@@ -154,7 +156,7 @@ func (l *lexer) scanIdentifier(start, line, column int) {
 }
 
 func (l *lexer) scanNumber(start, line, column int) {
-	if strings.HasPrefix(strings.ToLower(l.source[l.offset:]), "0x") {
+	if rest := l.source[l.offset:]; len(rest) >= 2 && rest[0] == '0' && (rest[1] == 'x' || rest[1] == 'X') {
 		l.advanceBytes(2)
 		for l.offset < len(l.source) && isHex(l.source[l.offset]) {
 			l.advanceBytes(1)

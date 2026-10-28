@@ -1,6 +1,9 @@
 package kql
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // Parse must never panic: malformed input returns errors instead.
 func FuzzParseNeverPanics(f *testing.F) {
@@ -46,5 +49,22 @@ func TestQueryHintsAreIgnored(t *testing.T) {
 	script, errs := Parse(`T | as hint.materialized=true X`)
 	if len(errs) != 0 || script.Statements[0].(*ExpressionStatement).Pipeline.Operators[0].Body.(AsSpec).Materialized == nil {
 		t.Fatalf("as hint.materialized must stay semantic: %v", errs)
+	}
+}
+
+// Unicode digits outside ASCII once sent the lexer into an endless loop of
+// empty number tokens.
+func TestLexerTerminatesOnUnicodeDigits(t *testing.T) {
+	for _, source := range []string{"print ٦", "print x=1٦2", "٣", "print 0x", "print 1.e٦"} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			Parse(source)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("lexing %q did not terminate", source)
+		}
 	}
 }
