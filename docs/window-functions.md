@@ -29,7 +29,7 @@ Calls are lifted innermost first, so restart predicates such as
 
 | Function | SQL |
 | --- | --- |
-| `prev(e[, offset[, default]])`, `next(...)` | `LAG`/`LEAD`. The offset must be a non-negative integer literal. |
+| `prev(e[, offset[, default]])`, `next(...)` | `LAG`/`LEAD`. The offset must be a non-negative integer literal. A string value with no default gets `""` past the edge, because KQL strings have no null. |
 | `row_number([start[, restart]])` | `ROW_NUMBER()` plus `start - 1`. The start must be an integer literal. |
 | `row_cumsum(term[, restart])` | `SUM` with a `ROWS UNBOUNDED PRECEDING` frame. Int and long terms give long; real gives real. |
 | `row_rank_dense(term[, restart])` | A running sum of "first row or term changed from the previous row". Null equals null. |

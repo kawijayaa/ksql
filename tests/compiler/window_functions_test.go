@@ -44,6 +44,7 @@ func TestWindowFunctionExecution(t *testing.T) {
 			{`range a from 1 to 3 step 1 | top 2 by a desc | extend rn=row_number()`, `[[3 1] [2 2]]`, `long long`},
 			// Window functions can be used together; a user function named prev keeps precedence.
 			{`range a from 1 to 3 step 1 | sort by a asc | extend rn=row_number(), cs=row_cumsum(a), p=prev(a)`, `[[1 1 1 <nil>] [2 2 3 1] [3 3 6 2]]`, `long long long long`},
+			{`datatable(s:string)["a","b"] | sort by s asc | extend p=prev(s), n=next(s), e=strlen(prev(s))`, `[[a  b 0] [b a  1]]`, `string string string long`},
 			{`let prev=(x:long){x*100}; range a from 1 to 2 step 1 | extend p=prev(a)`, `[[1 100] [2 200]]`, `long long`},
 		} {
 			result := compiler.Compile(tc.query)

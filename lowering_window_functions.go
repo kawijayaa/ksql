@@ -246,6 +246,9 @@ func (w *windowStages) lower(call *kql.CallExpression, function string) (string,
 				return "", false
 			}
 			args = append(args, fallback.SQL)
+		} else if value.Type == TypeString {
+			// KQL strings have no null; a missing previous string is empty.
+			args = append(args, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""})
 		}
 		name := map[string]string{"prev": "lag", "next": "lead"}[function]
 		w.stage([]string{result}, []boundExpr{{SQL: w.window(&sqlast.Call{Name: name, Args: args}, nil, false), Type: value.Type}})
