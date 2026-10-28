@@ -58,7 +58,9 @@ func NormalizeParameters(query Query, arguments []any) []any {
 		case *Index:
 			value.Value, value.Index = expression(value.Value), expression(value.Index)
 		case *Regex:
-			value.Value, value.Pattern = expression(value.Value), expression(value.Pattern)
+			// Anonymous-placeholder dialects render regex UDFs as (pattern, value).
+			value.Pattern = expression(value.Pattern)
+			value.Value = expression(value.Value)
 		case *Exists:
 			visitQuery(value.Query)
 		case *RankedValue:

@@ -263,3 +263,14 @@ func TestSQLiteExecParameterRenderOrderAndReuse(t *testing.T) {
 		t.Fatalf("unused Args = %#v, want %#v", unused.Args, want)
 	}
 }
+
+func TestSQLiteExecRegexPlaceholderOrder(t *testing.T) {
+	db := openInvestigationDB(t)
+	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
+		compiler := ksql.New(dialect.SQLite(dialect.WithRegexFunction("kql_regex"), dialect.WithRegexCaseInsensitiveFlag("(?i)")), ksql.WithParameterization(mode))
+		result := compiler.Compile(`print a="abc" matches regex "^a", b="xyz" matches regex "^a", c="ABC" contains "b", d=strcat("a","bc") matches regex "c$"`)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != `[[1 0 1 1]]` {
+			t.Fatalf("mode=%d rows = %s; SQL=%s args=%v", mode, got, result.SQL, result.Args)
+		}
+	}
+}
