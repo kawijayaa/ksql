@@ -137,3 +137,43 @@ func TestTypeofLiteral(t *testing.T) {
 		}
 	}
 }
+
+func TestTemporalRange(t *testing.T) {
+	db, err := sql.Open("ksql_timespan_sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
+		compiler := ksql.New(dialect.SQLite(dialect.WithDatetimeArithmeticFunctions("test_dt_add", "test_dt_diff")), ksql.WithParameterization(mode))
+		for _, tc := range []struct{ query, want string }{
+			{`range t from 1h to 3h step 1h`, `[[36000000000] [72000000000] [108000000000]]`},
+			{`range t from 1h to 3h step 1h | getschema | project ColumnType`, `[[timespan]]`},
+			{`range t from 3h to 1h step -1h | count`, `[[3]]`},
+		} {
+			result := compiler.Compile(tc.query)
+			if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+				t.Fatalf("mode=%d %s: got=%s want=%s SQL=%s", mode, tc.query, got, tc.want, result.SQL)
+			}
+		}
+	}
+	compiler := ksql.New(dialect.SQLite(dialect.WithDatetimeArithmeticFunctions("test_dt_add", "test_dt_diff")), ksql.WithParameters())
+	for _, tc := range []struct{ query, want string }{
+		{`range d from datetime(2020-01-01) to datetime(2020-01-03) step 1d`, `[[2020-01-01T00:00:00Z] [2020-01-02T00:00:00Z] [2020-01-03T00:00:00Z]]`},
+		{`range d from datetime(2020-01-01) to datetime(2020-01-01 01:00) step 25m | getschema | project ColumnType`, `[[datetime]]`},
+		{`range d from datetime(2020-01-01) to datetime(2020-01-01 01:00) step 25m | count`, `[[3]]`},
+	} {
+		result := compiler.Compile(tc.query)
+		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s SQL=%s", tc.query, got, tc.want, result.SQL)
+		}
+	}
+	for _, query := range []string{`range d from datetime(2020-01-01) to 5 step 1d`, `range d from 1h to 3 step 1h`} {
+		if result := compiler.Compile(query); result.OK() || result.Diagnostics[0].Code != "KQLB0216" {
+			t.Fatalf("%s: %#v", query, result.Diagnostics)
+		}
+	}
+	if result := ksql.New(dialect.SQLite()).Compile(`range d from datetime(2020-01-01) to datetime(2020-01-02) step 1h`); result.OK() || result.Diagnostics[0].Code != "KQLL0412" {
+		t.Fatalf("missing capability: %#v", result.Diagnostics)
+	}
+}

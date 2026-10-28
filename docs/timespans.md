@@ -38,6 +38,10 @@ capability).
 
 `sum`, `min`, `max` and `avg` over timespans return timespans.
 
+`range` accepts timespan bounds and step (a ticks series typed `timespan`), and
+datetime bounds with a timespan step, lowered as offsets from the lower bound
+through the datetime capability.
+
 ## Open
 
 `totimespan` of non-literal strings, `format_timespan`, `make_timespan`,

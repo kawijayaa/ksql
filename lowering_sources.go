@@ -77,6 +77,12 @@ func (s *compileState) source(source kql.Source) Relation {
 		return Relation{Query: &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}, Schema: schema}
 	case "range":
 		from, to, step := s.expression(source.From), s.expression(source.To), s.expression(source.Step)
+		if from.SQL == nil || to.SQL == nil || step.SQL == nil {
+			return Relation{}
+		}
+		if from.Type == TypeDateTime || to.Type == TypeDateTime || from.Type == TypeTimespan || step.Type == TypeTimespan {
+			return s.temporalRange(source.Name, from, to, step, source.Span)
+		}
 		columnType := TypeLong
 		if s.compiler.dialect.Name() == "sqlite" {
 			for _, value := range []boundExpr{from, to, step} {
@@ -139,4 +145,30 @@ func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
 		return nil
 	}
 	return &sqlast.Table{Parts: []string{stringLiteralValue(literal)}}
+}
+
+// temporalRange lowers datetime and timespan ranges onto the numeric series:
+// timespans are ticks, and datetimes are offsets from the lower bound.
+func (s *compileState) temporalRange(name string, from, to, step boundExpr, span kql.Span) Relation {
+	feature := "source.range"
+	switch {
+	case from.Type == TypeTimespan && to.Type == TypeTimespan && step.Type == TypeTimespan:
+		series := &sqlast.Series{Column: name, From: from.SQL, To: to.SQL, Step: step.SQL, Alias: s.nextAlias()}
+		return Relation{Query: &sqlast.Select{From: series}, Schema: Schema{Columns: []Column{{Name: name, Type: TypeTimespan}}}}
+	case from.Type == TypeDateTime && to.Type == TypeDateTime && step.Type == TypeTimespan:
+		if !supportsDatetimeArithmetic(s.compiler.dialect) {
+			s.error("KQLL0412", span, feature, "datetime range requires a dialect datetime capability")
+			return Relation{}
+		}
+		offset := "__ksql_range_offset"
+		if strings.EqualFold(name, offset) {
+			offset += "1"
+		}
+		series := &sqlast.Series{Column: offset, From: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}, To: &sqlast.DatetimeDiff{Left: to.SQL, Right: from.SQL}, Step: step.SQL, Alias: s.nextAlias()}
+		value := &sqlast.DatetimeAdd{Datetime: from.SQL, Ticks: &sqlast.Identifier{Parts: []string{offset}}}
+		query := &sqlast.Select{From: &sqlast.Subquery{Query: &sqlast.Select{From: series}, Alias: s.nextAlias()}, Projections: []sqlast.SelectItem{{Expr: value, Alias: name}}}
+		return Relation{Query: query, Schema: Schema{Columns: []Column{{Name: name, Type: TypeDateTime}}}}
+	}
+	s.bindError("KQLB0216", span, feature, "range requires numeric bounds and step, timespan bounds and step, or datetime bounds with a timespan step")
+	return Relation{}
 }
