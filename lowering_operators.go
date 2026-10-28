@@ -61,6 +61,11 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 			return s.topNested(input, operator)
 		}
 	}
+	if operator.Kind == "reduce" {
+		if _, ok := operator.Body.(kql.ReduceSpec); ok {
+			return s.reduce(input, operator)
+		}
+	}
 	if operator.Kind == "scan" {
 		if _, ok := operator.Body.(kql.ScanSpec); ok {
 			return s.scan(input, operator)

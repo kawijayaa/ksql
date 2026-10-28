@@ -386,6 +386,9 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 	if kind == "top-nested" {
 		return parseTopNested(op, stripQueryHints(body))
 	}
+	if kind == "reduce" {
+		return parseReduce(op, stripQueryHints(body))
+	}
 	if kind != "as" {
 		body = stripQueryHints(body)
 	}

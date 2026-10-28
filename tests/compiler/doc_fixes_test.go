@@ -8,6 +8,7 @@ import (
 
 	"github.com/kawijayaa/ksql"
 	"github.com/kawijayaa/ksql/dialect"
+	"github.com/kawijayaa/ksql/sqlast"
 )
 
 // Fixes found by running Microsoft's documentation examples: hex literals,
@@ -209,5 +210,49 @@ func TestSQLiteExecTopHittersAndNested(t *testing.T) {
 	}
 	if result := compiler.Compile(data + ` | top-nested 1 of host with others = "x" by count()`); len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "KQLB0362" {
 		t.Fatalf("with others: %v", result.Diagnostics)
+	}
+}
+
+// reduce lowers through the application's pattern aggregates.
+func TestReduceLowering(t *testing.T) {
+	rule := func(name string) ksql.Option {
+		return ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: name, Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}}, nil
+		})
+	}
+	cast := func(name string, result ksql.ScalarType) ksql.Option {
+		return ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: name, Args: []sqlast.Expr{args[0].SQL}}}, nil
+		})
+	}
+	compiler := ksql.New(dialect.SQLite(), rule("reduce_patterns"), rule("reduce_source"), cast("tostring", ksql.TypeString), cast("tolong", ksql.TypeLong))
+	data := `datatable(s:string, n:long)["a b", 1]`
+	for _, tc := range []struct{ query, columns string }{
+		{data + ` | reduce by s`, `Pattern Count Representative`},
+		{data + ` | reduce by s with threshold=0.5, characters="-"`, `Pattern Count Representative`},
+		{data + ` | reduce kind=source by strcat(s, n) with threshold=0.2`, `s n Pattern`},
+	} {
+		result := compiler.Compile(tc.query)
+		if !result.OK() {
+			t.Fatalf("%s: %v", tc.query, result.Diagnostics)
+		}
+		names := []string{}
+		for _, column := range result.Columns {
+			names = append(names, column.Name)
+		}
+		if got := strings.Join(names, " "); got != tc.columns {
+			t.Errorf("%s: columns %s, want %s", tc.query, got, tc.columns)
+		}
+	}
+	for _, tc := range []struct{ query, code string }{
+		{data + ` | reduce kind=other by s`, "KQLP0364"},
+		{data + ` | reduce s`, "KQLP0364"},
+		{data + ` | reduce by s with limit=1`, "KQLP0364"},
+		{`T | reduce kind=source by s`, "KQLB0364"},
+	} {
+		result := compiler.Compile(tc.query)
+		if result.OK() || result.Diagnostics[0].Code != tc.code {
+			t.Errorf("%s: diagnostics %v, want %s", tc.query, result.Diagnostics, tc.code)
+		}
 	}
 }

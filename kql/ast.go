@@ -281,6 +281,15 @@ type TopNestedLevel struct {
 
 type TopNestedSpec struct{ Levels []TopNestedLevel }
 
+// ReduceSpec is reduce [kind = source] by By [with threshold, characters].
+type ReduceSpec struct {
+	Source     bool
+	By         Expression
+	Threshold  Expression
+	Characters Expression
+}
+
+func (ReduceSpec) operatorBody()     {}
 func (TopHittersSpec) operatorBody() {}
 func (TopNestedSpec) operatorBody()  {}
 

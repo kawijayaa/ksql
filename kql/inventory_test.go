@@ -14,7 +14,7 @@ func TestEveryQueryOperatorParsesAsRecognized(t *testing.T) {
 		"order": true, "top": true, "join": true, "lookup": true,
 		"union": true, "count": true, "mv-expand": true, "mvexpand": true,
 		"mv-apply": true, "mvapply": true, "as": true, "invoke": true,
-		"parse": true, "parse-where": true, "parse-kv": true, "render": true, "evaluate": true, "make-series": true, "partition": true, "scan": true, "top-hitters": true, "top-nested": true,
+		"parse": true, "parse-where": true, "parse-kv": true, "render": true, "evaluate": true, "make-series": true, "partition": true, "scan": true, "top-hitters": true, "top-nested": true, "reduce": true,
 	}
 	for name := range queryOperators {
 		if typed[name] {

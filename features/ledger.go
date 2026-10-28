@@ -115,6 +115,7 @@ func initEntries() {
 		setSupport("function.row_window_session", Validated, Equivalent, "named extend items lowered through scan with prev()-capable restart conditions; see docs/scan.md")
 		setSupport("operator.top-nested operator.top-hitters", Validated, Equivalent, "nested per-parent ranking with row_number() and exact top-hitters; top-nested with others is unsupported; see docs/top-nested.md")
 		setSupport("operator.find statement.set statement.pattern operator.scalar.unary_minus operator.scalar.unary_plus", Validated, Equivalent, "see docs/search.md, docs/scalar-semantics.md and docs/patterns.md")
+		setSupport("operator.reduce", Validated, Equivalent, "default and source kinds with threshold and characters through the application's reduce_patterns and reduce_source aggregates; see docs/reduce.md")
 		setSupport("operator.consume", Validated, Equivalent, "returns the input's schema with no records")
 		setSupport("operator.scan", Validated, Equivalent, "Kusto's two-check matching logic as a recursive query, with declared columns, step references, match ids and output modes; see docs/scan.md")
 		setSupport("operator.partition", Validated, Equivalent, "per-key UNION ALL branches over values discovered with an application ValuesResolver; legacy (64 keys, own-source bodies), native and shuffle (1024 keys); see docs/partition.md")
