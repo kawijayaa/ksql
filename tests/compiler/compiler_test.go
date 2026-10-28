@@ -217,7 +217,7 @@ func TestCompileTermOperators(t *testing.T) {
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}
-	want := `SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("state" ~* '(^|[^[:alnum:]])New([^[:alnum:]]|$)') AND NOT ("code" ~ '(^|[^[:alnum:]])ERR[[:alnum:]]*'))`
+	want := `SELECT * FROM (SELECT * FROM "Events") AS "_k0" WHERE (("state" ~* '(^|[^[:alnum:]])New([^[:alnum:]]|$)') AND NOT (COALESCE("code", '') ~ '(^|[^[:alnum:]])ERR[[:alnum:]]*'))`
 	if result.SQL != want {
 		t.Fatalf("Compile() SQL = %q, want %q", result.SQL, want)
 	}

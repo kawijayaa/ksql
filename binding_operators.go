@@ -238,6 +238,9 @@ func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expr
 		s.bindError("KQLB0353", literal.Span, "operator.scalar.has", fmt.Sprintf("term pattern exceeds MaxRegexBytes (%d)", limit))
 		return nil, false
 	}
+	if negative {
+		left = emptyIfNull(left)
+	}
 	result := sqlast.Expr(&sqlast.Regex{Value: left, Pattern: s.bind(pattern), CaseSensitive: caseSensitive})
 	if negative {
 		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
@@ -256,6 +259,10 @@ func (s *compileState) termBoundaries() (string, string) {
 // and case-sensitive operators compare exact characters.
 func stringMatch(left, right sqlast.Expr, wildcard string, caseSensitive, negative bool) sqlast.Expr {
 	mode := map[string]string{"both": "contains", "suffix": "startswith", "prefix": "endswith"}[wildcard]
+	if negative {
+		// A Kusto null string is empty, so negated matches of null are true.
+		left = emptyIfNull(left)
+	}
 	result := sqlast.Expr(&sqlast.StringMatch{Value: left, Pattern: right, Mode: mode, CaseSensitive: caseSensitive})
 	if negative {
 		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
@@ -405,4 +412,8 @@ func (s *compileState) tabularMembership(op string, left boundExpr, pipeline *kq
 		result = &sqlast.Unary{Operator: "NOT ", Operand: result}
 	}
 	return boundExpr{SQL: result, Type: TypeBool}
+}
+
+func emptyIfNull(value sqlast.Expr) sqlast.Expr {
+	return &sqlast.Call{Name: "coalesce", Args: []sqlast.Expr{value, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: ""}}}
 }

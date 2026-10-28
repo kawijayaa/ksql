@@ -37,6 +37,12 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		if len(pipeline.Operators) == 0 && pipeline.Source.Kind == "table" {
 			label = unquoteKQL(pipeline.Source.Name)
 		}
+		// A leg ending in "as Name" is labeled Name.
+		if n := len(pipeline.Operators); n > 0 && pipeline.Operators[n-1].Kind == "as" {
+			if spec, ok := pipeline.Operators[n-1].Body.(kql.AsSpec); ok && spec.Name != "" {
+				label = spec.Name
+			}
+		}
 		legs = append(legs, leg)
 		labels = append(labels, label)
 	}

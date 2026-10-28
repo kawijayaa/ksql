@@ -24,7 +24,9 @@ func TestDocumentationSyntaxFixes(t *testing.T) {
 		{`print x=1 | as ['Count of events'] | project x`, `[[1]]`},
 		{`let MyFunction1 = (param1:int) { print A="", B=1 }; print Columns=column_names_of(MyFunction1(1))`, `[[["A","B"]]]`},
 		{`let T = datatable(A:string, B:int) []; print Columns=column_names_of(T)`, `[[["A","B"]]]`},
-		{`datatable(x:long)[1, long(null), 3] | summarize count(x), count(), countif(x > 1)`, `[[2 3 1]]`},
+		{`datatable(x:long)[1, long(null), 3] | summarize count(x), count(), countif(x > 1)`, `[[3 3 1]]`},
+		{`datatable(s:string)["555-1", "x"] | extend n = iff(s == "x", string(null), s) | where n !startswith "555" and n !contains "1" and n !endswith "9" | project s`, `[[x]]`},
+		{`union withsource=TableName (range x from 1 to 2 step 1 | as T1), (range x from 1 to 1 step 1 | as T2) | order by TableName asc, x asc`, `[[T1 1] [T1 2] [T2 1]]`},
 	} {
 		result := compiler.Compile(tc.query)
 		if got := fmt.Sprint(queryRows(t, db, result)); got != tc.want {
