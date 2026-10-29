@@ -20,6 +20,14 @@ type FunctionRule func(arguments []sqlast.Expr) (sqlast.Expr, error)
 type TypedExpression struct {
 	SQL  sqlast.Expr
 	Type ScalarType
+	// Constant is the compile-time value of a literal or bound query
+	// parameter argument, when HasConstant is set.
+	Constant    any
+	HasConstant bool
+	// Deferred marks a non-constant argument while a function declaration is
+	// validated against placeholder parameters; each call is bound again with
+	// its actual arguments, so rules may skip constant-only checks.
+	Deferred bool
 }
 
 // TypedFunctionRule can validate argument types and specify the result type.

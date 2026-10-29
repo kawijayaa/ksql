@@ -227,6 +227,11 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		typed := make([]TypedExpression, len(args))
 		for i := range args {
 			typed[i] = TypedExpression{SQL: args[i], Type: argTypes[i]}
+			if constant, ok := s.constantValue(args[i]); ok {
+				typed[i].Constant, typed[i].HasConstant = constant, true
+			} else {
+				typed[i].Deferred = s.functionValidation
+			}
 		}
 		result, err := rule(typed)
 		if err != nil {

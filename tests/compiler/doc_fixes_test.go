@@ -517,3 +517,26 @@ func TestArraySortColumnsAndRealDivision(t *testing.T) {
 		t.Errorf("real division: %v\n%s", division.Diagnostics, division.SQL)
 	}
 }
+
+// Typed rules see the compile-time value of literal and parameter
+// arguments, and declaration validation marks parameters as deferred.
+func TestTypedArgumentConstants(t *testing.T) {
+	var seen []string
+	compiler := ksql.New(dialect.SQLite(), ksql.WithParameters(), ksql.WithTypedFunction("probe", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		seen = append(seen, fmt.Sprintf("%v:%v:%v", args[0].HasConstant, args[0].Constant, args[0].Deferred))
+		return ksql.TypedExpression{Type: ksql.TypeString, SQL: args[0].SQL}, nil
+	}))
+	for _, query := range []string{
+		`print probe("lit")`,
+		`declare query_parameters(p:string = "param"); print probe(p)`,
+		`let f = (p:string) { print probe(p) }; f("call")`,
+		`datatable(c:string)["x"] | project probe(c)`,
+	} {
+		if result := compiler.Compile(query); !result.OK() {
+			t.Fatalf("%s: %v", query, result.Diagnostics)
+		}
+	}
+	if got := strings.Join(seen, " "); got != "true:lit:false true:param:false false:<nil>:true true:call:false false:<nil>:false" {
+		t.Errorf("typed arguments %s", got)
+	}
+}
