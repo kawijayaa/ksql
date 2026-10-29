@@ -25,6 +25,12 @@ func FuzzCompileNeverPanics(f *testing.F) {
 		`let V_1 = view () { print x=1 }; union isfuzzy=true V*, *X, (V_1 | where x > 0)`,
 		`print guid({12e8b78d-55b4-46ae-b068-26d7a0080254}), f(a=1, 2)`,
 		`print x=dynamic(["2020-01-01"]) | mv-expand x to typeof(datetime), y to typeof(guid)`,
+		`let f = (c:string, n:long) { datatable(a:long)[1] | project v = column_ifexists(c, -1) | take n }; f("a", 2)`,
+		`let T = datatable(x:long)[1]; let g = (t:string) { table(t, "hotcache") | count }; g("T")`,
+		`print a = datetime(2020-01-02) between (datetime(2020-01-01) .. 1d), b = "x" !in~ ("X", ""), c = string(null) != "a"`,
+		`datatable(s:string, t:string)["a b", "b"] | where s has t or s !hasprefix_cs t`,
+		`print (p, q) = array_sort_asc(dynamic([2,1]), dynamic(["b","a"]), false), r = 1.0 / 0.0`,
+		`let y = () { toscalar(rand()) }; print a = y, b = y, c = bag_pack_columns(a)`,
 	} {
 		f.Add(seed)
 	}
